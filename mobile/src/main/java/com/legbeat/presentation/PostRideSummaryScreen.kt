@@ -1,0 +1,474 @@
+package com.legbeat.presentation
+
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.legbeat.analytics.engine.OfflineCoachingEngine
+import com.legbeat.analytics.engine.ZoneCalculator
+import com.legbeat.analytics.repository.RideRepository
+import com.legbeat.core.model.CadenceSample
+import com.legbeat.core.model.CadenceZone
+import com.legbeat.core.model.Ride
+import com.legbeat.fit.FitActivityEncoder
+import com.legbeat.healthconnect.HealthConnectManager
+import com.legbeat.presentation.theme.ElectricMint
+import com.legbeat.presentation.theme.ElectricYellow
+import com.patrykandpatrick.vico.compose.axis.horizontal.rememberBottomAxis
+import com.patrykandpatrick.vico.compose.axis.vertical.rememberStartAxis
+import com.patrykandpatrick.vico.compose.chart.Chart
+import com.patrykandpatrick.vico.compose.chart.line.lineChart
+import com.patrykandpatrick.vico.core.entry.FloatEntry
+import com.patrykandpatrick.vico.core.entry.entryModelOf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PostRideSummaryScreen(
+    rideId: String,
+    rideRepository: RideRepository,
+    healthConnectManager: HealthConnectManager,
+    fitEncoder: FitActivityEncoder,
+    zoneCalculator: ZoneCalculator,
+    coachingEngine: OfflineCoachingEngine,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var ride by remember { mutableStateOf<Ride?>(null) }
+    var samples by remember { mutableStateOf<List<CadenceSample>>(emptyList()) }
+    var isSyncingToHealth by remember { mutableStateOf(false) }
+    var isExportingFit by remember { mutableStateOf(false) }
+    var healthSyncedState by remember { mutableStateOf(false) }
+    var fitExportPath by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(rideId) {
+        val loadedRide = withContext(Dispatchers.IO) { rideRepository.getRideById(rideId) }
+        val loadedSamples = withContext(Dispatchers.IO) { rideRepository.getSamplesForRide(rideId) }
+        ride = loadedRide
+        samples = loadedSamples
+        healthSyncedState = loadedRide?.healthConnectSynced == true
+        fitExportPath = loadedRide?.fitFilePath
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Ride Summary", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+        }
+    ) { padding ->
+        val currentRide = ride
+        if (currentRide == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = ElectricYellow)
+            }
+            return@Scaffold
+        }
+
+        val scrollState = rememberScrollState()
+        val zoneBreakdown = remember(samples) { zoneCalculator.calculate(samples) }
+        val coachingInsights = remember(currentRide, samples) {
+            coachingEngine.generateInsights(currentRide, samples)
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(scrollState)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header Stats Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                StatCard(
+                    title = "Avg Cadence",
+                    value = "${currentRide.avgCadence}",
+                    unit = "RPM",
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                StatCard(
+                    title = "Max Cadence",
+                    value = "${currentRide.maxCadence}",
+                    unit = "RPM",
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                StatCard(
+                    title = "Duration",
+                    value = formatDuration(currentRide.durationMs),
+                    unit = "Time",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Vico Time-Series Chart
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Cadence Rhythm Over Time",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (samples.isNotEmpty()) {
+                        // Downsample if samples > 100 for optimal chart performance
+                        val chartStep = (samples.size / 60).coerceAtLeast(1)
+                        val chartEntries = samples.filterIndexed { index, _ -> index % chartStep == 0 }
+                            .mapIndexed { index, sample ->
+                                FloatEntry(x = index.toFloat(), y = sample.rpm.toFloat())
+                            }
+
+                        val chartModel = entryModelOf(chartEntries)
+
+                        Chart(
+                            chart = lineChart(),
+                            model = chartModel,
+                            startAxis = rememberStartAxis(
+                                valueFormatter = { value, _ -> "${value.toInt()} RPM" }
+                            ),
+                            bottomAxis = rememberBottomAxis(
+                                valueFormatter = { value, _ ->
+                                    val sec = (value * chartStep).toInt()
+                                    "${sec / 60}m"
+                                }
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No cadence samples recorded", color = Color.Gray)
+                        }
+                    }
+                }
+            }
+
+            // Time in Zones Breakdown
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Time in Zones",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    zoneBreakdown.zones.forEach { zoneDuration ->
+                        ZoneRow(
+                            label = zoneDuration.zone.label,
+                            rpmRange = "${zoneDuration.zone.minRpm}-${zoneDuration.zone.maxRpm} RPM",
+                            seconds = zoneDuration.seconds,
+                            percentage = zoneDuration.percentage,
+                            color = Color(zoneDuration.zone.colorHex)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+            }
+
+            // Offline Coaching Insights Card
+            if (coachingInsights.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Favorite,
+                                contentDescription = null,
+                                tint = ElectricYellow,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Offline Coaching Insights",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        coachingInsights.forEach { insight ->
+                            Text(
+                                text = insight.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ElectricMint
+                            )
+                            Text(
+                                text = insight.description,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Recommendation: ${insight.recommendation}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.LightGray,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+
+            // Action Buttons: Google Health Connect & Garmin FIT Export
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // "Save to Google Health" Button (Requirement 3)
+                Button(
+                    onClick = {
+                        scope.launch {
+                            isSyncingToHealth = true
+                            val result = withContext(Dispatchers.IO) {
+                                healthConnectManager.writeWorkoutSession(currentRide, samples)
+                            }
+                            if (result.isSuccess) {
+                                withContext(Dispatchers.IO) {
+                                    rideRepository.markHealthConnectSynced(currentRide.id)
+                                }
+                                healthSyncedState = true
+                                Toast.makeText(context, "Saved to Google Health Connect!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "Health Connect Sync Error: ${result.exceptionOrNull()?.localizedMessage ?: "Unknown"}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            isSyncingToHealth = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !healthSyncedState && !isSyncingToHealth,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (healthSyncedState) ElectricMint else ElectricYellow,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    if (isSyncingToHealth) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Syncing with Health Connect...")
+                    } else if (healthSyncedState) {
+                        Icon(Icons.Default.Check, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Synced to Google Health", fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(Icons.Default.Sync, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Save to Google Health", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // "Export Garmin FIT File" Button
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            isExportingFit = true
+                            val fitFile = File(context.getExternalFilesDir(null), "legbeat_${currentRide.id}.fit")
+                            val result = withContext(Dispatchers.IO) {
+                                fitEncoder.encode(fitFile, currentRide, samples)
+                            }
+                            if (result.isSuccess) {
+                                withContext(Dispatchers.IO) {
+                                    rideRepository.updateFitPath(currentRide.id, fitFile.absolutePath)
+                                }
+                                fitExportPath = fitFile.absolutePath
+                                Toast.makeText(context, "FIT File saved: ${fitFile.name}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "FIT Export Error", Toast.LENGTH_SHORT).show()
+                            }
+                            isExportingFit = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.FileDownload, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (fitExportPath != null) "FIT File Ready (Strava/TrainingPeaks)" else "Export Garmin .FIT File",
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StatCard(
+    title: String,
+    value: String,
+    unit: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(title, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+                color = ElectricYellow
+            )
+            Text(unit, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        }
+    }
+}
+
+@Composable
+fun ZoneRow(
+    label: String,
+    rpmRange: String,
+    seconds: Long,
+    percentage: Float,
+    color: Color
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(color, shape = RoundedCornerShape(2.dp))
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(label, style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("($rpmRange)", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            }
+            Text(
+                "${seconds / 60}m ${seconds % 60}s (${percentage.toInt()}%)",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.LightGray,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        LinearProgressIndicator(
+            progress = { (percentage / 100f).coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp),
+            color = color,
+            trackColor = Color(0xFF333333)
+        )
+    }
+}
+
+private fun formatDuration(durationMs: Long): String {
+    val totalSeconds = durationMs / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format(Locale.US, "%02d:%02d", minutes, seconds)
+}
