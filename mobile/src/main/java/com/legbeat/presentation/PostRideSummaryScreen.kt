@@ -103,6 +103,8 @@ fun PostRideSummaryScreen(
     var healthSyncedState by remember { mutableStateOf(false) }
     var fitExportPath by remember { mutableStateOf<String?>(null) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showShortRideDialog by remember { mutableStateOf(false) }
+    var hasCheckedShortRide by remember(rideId) { mutableStateOf(false) }
 
     LaunchedEffect(rideId) {
         val loadedRide = withContext(Dispatchers.IO) { rideRepository.getRideById(rideId) }
@@ -111,6 +113,55 @@ fun PostRideSummaryScreen(
         samples = loadedSamples
         healthSyncedState = loadedRide?.healthConnectSynced == true
         fitExportPath = loadedRide?.fitFilePath
+        if (!hasCheckedShortRide && loadedRide != null) {
+            val isShort = loadedRide.durationMs < 90_000L || loadedSamples.size < 10
+            if (isShort) {
+                showShortRideDialog = true
+            }
+            hasCheckedShortRide = true
+        }
+    }
+
+    if (showShortRideDialog && ride != null) {
+        val shortRide = ride!!
+        AlertDialog(
+            onDismissRequest = { showShortRideDialog = false },
+            title = { Text("Short Ride Recorded", fontWeight = FontWeight.Bold) },
+            text = {
+                val durStr = formatDuration(shortRide.durationMs)
+                Text("This ride was very short ($durStr). Would you like to delete this session?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val toDeleteId = shortRide.id
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                rideRepository.deleteRide(toDeleteId)
+                            }
+                            if (CadenceTrackingService.currentRideId.value == toDeleteId) {
+                                val stopIntent = Intent(context, CadenceTrackingService::class.java).apply {
+                                    action = CadenceTrackingService.ACTION_STOP
+                                }
+                                context.startService(stopIntent)
+                                CadenceTrackingService.resetTrackingState()
+                            }
+                            Toast.makeText(context, "Session deleted", Toast.LENGTH_SHORT).show()
+                            showShortRideDialog = false
+                            onBack()
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF5252))
+                ) {
+                    Text("Delete Session", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showShortRideDialog = false }) {
+                    Text("Keep Ride")
+                }
+            }
+        )
     }
 
     if (showDeleteDialog && ride != null) {
@@ -194,6 +245,11 @@ fun PostRideSummaryScreen(
             coachingEngine.generateInsights(currentRide, samples)
         }
 
+        val isVeryShortRide = currentRide.durationMs < 90_000L || samples.size < 10
+        val totalPedals = remember(currentRide, samples) {
+            calculateTotalPedals(samples, currentRide)
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -203,10 +259,10 @@ fun PostRideSummaryScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header Stats Row
+            // Header Stats Rows (2x2 Grid)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 StatCard(
                     title = "Avg Cadence",
@@ -214,18 +270,27 @@ fun PostRideSummaryScreen(
                     unit = "RPM",
                     modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
                 StatCard(
                     title = "Max Cadence",
                     value = "${currentRide.maxCadence}",
                     unit = "RPM",
                     modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 StatCard(
                     title = "Duration",
                     value = formatDuration(currentRide.durationMs),
                     unit = "Time",
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    title = "Total Pedals",
+                    value = "$totalPedals",
+                    unit = "Revolutions",
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -313,7 +378,44 @@ fun PostRideSummaryScreen(
             }
 
             // Offline Coaching Insights Card
-            if (coachingInsights.isNotEmpty()) {
+            if (isVeryShortRide) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Favorite,
+                                contentDescription = null,
+                                tint = ElectricYellow,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Offline Coaching Insights",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Aim for a Longer Ride",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ElectricMint
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "This ride was too short to generate detailed cadence coaching insights. Try to aim for a longer ride to unlock cadence efficiency analysis and personalized training recommendations!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White
+                        )
+                    }
+                }
+            } else if (coachingInsights.isNotEmpty()) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -540,4 +642,19 @@ private fun formatDuration(durationMs: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return String.format(Locale.US, "%02d:%02d", minutes, seconds)
+}
+
+private fun calculateTotalPedals(samples: List<CadenceSample>, ride: Ride): Int {
+    if (samples.isNotEmpty()) {
+        var totalRevs = 0.0
+        for (i in 0 until samples.size - 1) {
+            val dtMs = (samples[i + 1].timestampMs - samples[i].timestampMs).coerceIn(0L, 3000L)
+            val avgRpm = (samples[i].rpm + samples[i + 1].rpm) / 2.0
+            totalRevs += avgRpm * (dtMs / 60000.0)
+        }
+        val rounded = kotlin.math.round(totalRevs).toInt()
+        if (rounded > 0) return rounded
+    }
+    val minutes = ride.durationMs / 60000.0
+    return kotlin.math.round(ride.avgCadence * minutes).toInt().coerceAtLeast(0)
 }

@@ -3,8 +3,10 @@ package com.legbeat.presentation
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -121,13 +123,12 @@ fun DashboardScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.DirectionsBike,
-                            contentDescription = null,
-                            tint = ElectricYellow,
-                            modifier = Modifier.size(28.dp)
+                        Image(
+                            painter = painterResource(id = com.legbeat.R.drawable.ic_app_logo),
+                            contentDescription = "LegBeat Logo",
+                            modifier = Modifier.size(30.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text("LegBeat", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     }
                 },
