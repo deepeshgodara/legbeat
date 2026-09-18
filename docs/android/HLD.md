@@ -19,27 +19,27 @@ LegBeat Mobile follows strict **Clean Architecture** principles, enforcing separ
 
 ```mermaid
 graph TD
-    subgraph Presentation Layer [":mobile (Presentation)"]
-        UI[Jetpack Compose UI<br/>Dashboard / Active Ride / History]
-        VM[ActiveRideViewModel / DashboardViewModel]
+    subgraph Presentation_Layer [":mobile (Presentation)"]
+        UI["Jetpack Compose UI<br/>Dashboard / Active Ride / History"]
+        VM["ActiveRideViewModel / DashboardViewModel"]
     end
 
-    subgraph Domain Layer [":core (Domain)"]
-        UC1[ProcessSensorSignalUseCase]
-        UC2[RecordRideUseCase]
-        UC3[CalculateCadenceZonesUseCase]
-        UC4[ExportFitFileUseCase]
-        UC5[SyncHealthConnectUseCase]
-        Interfaces[Repository & BLE Sensor Interfaces]
+    subgraph Domain_Layer [":core (Domain)"]
+        UC1["ProcessSensorSignalUseCase"]
+        UC2["RecordRideUseCase"]
+        UC3["CalculateCadenceZonesUseCase"]
+        UC4["ExportFitFileUseCase"]
+        UC5["SyncHealthConnectUseCase"]
+        Interfaces["Repository & BLE Sensor Interfaces"]
     end
 
-    subgraph Data & Infrastructure Layer [":analytics, :healthconnect, :fit, :mobile"]
-        SensorDS[LinearAccelerationSensorDataSource]
-        WearSender[WearableMessageClientSender]
-        RoomRepo[RideRepositoryImpl (Room DB)]
-        HCRepo[HealthConnectRepositoryImpl]
-        FitRepo[FitFileEncoderRepositoryImpl]
-        BLERepo[BleSensorRepositoryImpl (Extensible)]
+    subgraph Data_Layer [":analytics, :healthconnect, :fit, :mobile"]
+        SensorDS["LinearAccelerationSensorDataSource"]
+        WearSender["WearableMessageClientSender"]
+        RoomRepo["RideRepositoryImpl (Room DB)"]
+        HCRepo["HealthConnectRepositoryImpl"]
+        FitRepo["FitFileEncoderRepositoryImpl"]
+        BLERepo["BleSensorRepositoryImpl (Extensible)"]
     end
 
     UI --> VM
@@ -84,13 +84,13 @@ When a phone is placed in a front pocket (either cycling jersey or shorts):
 
 ```mermaid
 sequenceDiagram
-    participant Sensor as Android SensorManager
-    participant Service as CadenceForegroundService
-    participant Buffer as RollingWindowBuffer (3s)
-    participant Resampler as SignalResampler (50 Hz)
-    participant FFT as FFT Engine (Cooley-Tukey)
-    participant Extractor as CadenceExtractor (1.0 - 2.5 Hz)
-    participant Wear as WearableMessageSender
+    participant Sensor as "Android SensorManager"
+    participant Service as "CadenceForegroundService"
+    participant Buffer as "RollingWindowBuffer (3s)"
+    participant Resampler as "SignalResampler (50 Hz)"
+    participant FFT as "FFT Engine (Cooley-Tukey)"
+    participant Extractor as "CadenceExtractor (1.0 - 2.5 Hz)"
+    participant Wear as "WearableMessageSender"
 
     Sensor->>Service: onSensorChanged(TYPE_LINEAR_ACCELERATION)
     Service->>Buffer: append(timestamp, x, y, z)
@@ -98,8 +98,8 @@ sequenceDiagram
         Service->>Buffer: getWindow(duration = 3.0s)
         Buffer->>Resampler: raw non-uniform samples
         Resampler->>FFT: 150 uniform samples (zero-padded to 256)
-        FFT->>Extractor: Power Spectrum |X(f)|^2
-        Extractor->>Extractor: Peak search in [1.0 Hz, 2.5 Hz] + Parabolic Interpolation
+        FFT->>Extractor: Power Spectrum |X(f)|²
+        Extractor->>Extractor: Peak search in 1.0 - 2.5 Hz + Parabolic Interpolation
         Extractor->>Service: CadenceValue(rpm = 88, confidence = 0.92)
         Service->>Wear: sendCadenceToWear(88 RPM)
     end
@@ -107,12 +107,12 @@ sequenceDiagram
 
 ### 3.2 Signal Processing Stages
 1. **Linear Acceleration Acquisition**: `Sensor.TYPE_LINEAR_ACCELERATION` strips static 9.81 m/s² gravity using the device sensor fusion filter.
-2. **Magnitude & Projection**: Compute euclidean magnitude $\sqrt{x^2 + y^2 + z^2}$ to make cadence calculation orientation-agnostic (phone can be upside down, sideways, or tilted).
+2. **Magnitude & Projection**: Compute euclidean magnitude `√(x² + y² + z²)` to make cadence calculation orientation-agnostic (phone can be upside down, sideways, or tilted).
 3. **Sliding Window**: 3.0-second rolling buffer (at 50 Hz = 150 samples). A 3-second window captures at least 3 full pedal strokes even at 60 RPM.
-4. **Resampling & Hann Windowing**: Resample non-uniform hardware sensor timestamps to uniform 50 Hz, then multiply by a Hann window $w(n) = 0.5 - 0.5 \cos\left(\frac{2\pi n}{N-1}\right)$ to eliminate spectral leakage.
+4. **Resampling & Hann Windowing**: Resample non-uniform hardware sensor timestamps to uniform 50 Hz, then multiply by a Hann window `w(n) = 0.5 - 0.5 cos(2πn / (N - 1))` to eliminate spectral leakage.
 5. **Radix-2 FFT & Zero-Padding**: Zero-pad 150 samples to 256 points for optimal power-of-2 Cooley-Tukey FFT.
-6. **Harmonic Peak Extraction with Parabolic Interpolation**: Locate dominant peak within the $1.0\text{ Hz} \le f \le 2.5\text{ Hz}$ passband. Perform parabolic peak interpolation using adjacent bins to obtain fractional frequency accuracy ($\pm 0.5\text{ RPM}$).
-7. **Noise Floor & Coasting Detection**: If peak energy or window RMS is below $0.35\text{ m/s}^2$, the cyclist is coasting or stopped; output is clamped to 0 RPM.
+6. **Harmonic Peak Extraction with Parabolic Interpolation**: Locate dominant peak within the `1.0 Hz ≤ f ≤ 2.5 Hz` passband. Perform parabolic peak interpolation using adjacent bins to obtain fractional frequency accuracy (±0.5 RPM).
+7. **Noise Floor & Coasting Detection**: If peak energy or window RMS is below 0.35 m/s², the cyclist is coasting or stopped; output is clamped to 0 RPM.
 
 ---
 
@@ -130,21 +130,21 @@ To future-proof LegBeat for Bluetooth Low Energy peripherals:
 
 ```mermaid
 graph LR
-    subgraph Data Sources
-        LocalCadence[Pocket Cadence Engine]
-        BleSensors[Future BLE HR/Power]
+    subgraph Data_Sources ["Data Sources"]
+        LocalCadence["Pocket Cadence Engine"]
+        BleSensors["Future BLE HR / Power"]
     end
 
-    subgraph Storage & Export
-        Room[Room Database<br/>Rides, Samples, Metrics]
-        HC[Google Health Connect<br/>ExerciseSessionRecord + CyclingCadenceRecord]
-        FIT[Garmin FIT SDK 21.158.0<br/>Standard Binary .fit File]
+    subgraph Storage_Export ["Storage & Export"]
+        Room["Room Database<br/>Rides, Samples, Metrics"]
+        HC["Google Health Connect<br/>ExerciseSessionRecord + CyclingCadenceRecord"]
+        FIT["Garmin FIT SDK 21.158.0<br/>Standard Binary .fit File"]
     end
 
-    subgraph External Platforms
-        Strava[Strava]
-        TP[TrainingPeaks]
-        OtherApps[3rd-Party GPS Trackers]
+    subgraph External_Platforms ["External Platforms"]
+        Strava["Strava"]
+        TP["TrainingPeaks"]
+        OtherApps["3rd-Party GPS Trackers"]
     end
 
     LocalCadence --> Room

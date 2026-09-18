@@ -6,29 +6,29 @@ The **LegBeat Wear OS Application** (`:wear`) provides a distraction-free, ultra
 
 ```mermaid
 graph TD
-    subgraph Mobile Device [":mobile"]
-        CadenceEngine[Linear Acceleration FFT Pipeline]
-        WearSender[WearableMessageClientSender]
-        CadenceEngine -->|Cadence Updates (2 Hz)| WearSender
+    subgraph Mobile_Device [":mobile"]
+        CadenceEngine["Linear Acceleration FFT Pipeline"]
+        WearSender["WearableMessageClientSender"]
+        CadenceEngine -->|"Cadence Updates (2 Hz)"| WearSender
     end
 
-    subgraph Wear OS Device [":wear"]
-        DataLayer[Google Play Services Data Layer]
-        Listener[WearableCadenceMessageListener]
-        Watchdog[Heartbeat Watchdog Timer (5s)]
-        AmbientObs[AmbientLifecycleObserver]
-        ViewModel[WearCadenceViewModel]
-        UI[Compose for Wear OS Heads-Up Display]
+    subgraph Wear_Device [":wear"]
+        DataLayer["Google Play Services Data Layer"]
+        Listener["WearableCadenceMessageListener"]
+        Watchdog["Heartbeat Watchdog Timer (5s)"]
+        AmbientObs["AmbientLifecycleObserver"]
+        ViewModel["WearCadenceViewModel"]
+        UI["Compose for Wear OS Heads-Up Display"]
 
         DataLayer --> Listener
-        Listener -->|Cadence Packet| ViewModel
-        Listener -->|Reset Timer| Watchdog
-        Watchdog -->|Timeout Trigger| ViewModel
-        AmbientObs -->|Active / Ambient State| ViewModel
+        Listener -->|"Cadence Packet"| ViewModel
+        Listener -->|"Reset Timer"| Watchdog
+        Watchdog -->|"Timeout Trigger"| ViewModel
+        AmbientObs -->|"Active / Ambient State"| ViewModel
         ViewModel --> UI
     end
 
-    WearSender -. Bluetooth Low Energy / Wi-Fi .-> DataLayer
+    WearSender -.->|"Bluetooth Low Energy / Wi-Fi"| DataLayer
 ```
 
 ### 1.1 Key Objectives
@@ -45,20 +45,20 @@ The `:wear` app follows Clean Architecture adapted for Wear OS micro-displays:
 
 ```mermaid
 graph LR
-    subgraph Data Layer
-        MsgReceiver[MessageClient Receiver]
-        NodeTracker[NodeClient Connection Monitor]
+    subgraph Data_Layer ["Data Layer"]
+        MsgReceiver["MessageClient Receiver"]
+        NodeTracker["NodeClient Connection Monitor"]
     end
 
-    subgraph Domain Layer
-        WatchdogTimer[CadenceWatchdogTimer]
-        ZoneEvaluator[CadenceZoneEvaluator]
+    subgraph Domain_Layer ["Domain Layer"]
+        WatchdogTimer["CadenceWatchdogTimer"]
+        ZoneEvaluator["CadenceZoneEvaluator"]
     end
 
-    subgraph Presentation Layer
-        VM[WearCadenceViewModel]
-        AmbientHandler[AmbientModeObserver]
-        ComposeScreen[CadenceDisplayScreen]
+    subgraph Presentation_Layer ["Presentation Layer"]
+        VM["WearCadenceViewModel"]
+        AmbientHandler["AmbientModeObserver"]
+        ComposeScreen["CadenceDisplayScreen"]
     end
 
     MsgReceiver --> VM
@@ -91,15 +91,15 @@ stateDiagram-v2
     [*] --> ActiveState: App Launched
 
     state ActiveState {
-        HighContrastColor: Full color cadence & zone accent
-        HighRefresh: Instant UI updates (2 Hz)
+        ActiveMode: Full color cadence and zone accent
+        HighRefresh: Instant UI updates at 2 Hz
         FullGraphics: Circular zone meter active
     }
 
     state AmbientState {
-        Monochrome: Pure Black (#000000) & White (#FFFFFF)
-        BurnInProtection: Thin fonts, shifted pixels, no large solids
-        LowPower: Reduced refresh rate (1 Hz or on-packet)
+        Monochrome: Pure Black and White OLED display
+        BurnInProtection: Thin fonts and shifted pixels
+        LowPower: Reduced refresh rate on packet
     }
 
     ActiveState --> AmbientState: User drops wrist / screen times out
