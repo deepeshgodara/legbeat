@@ -1,6 +1,7 @@
 package com.legbeat.presentation
 
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -58,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.legbeat.analytics.engine.OfflineCoachingEngine
 import com.legbeat.analytics.engine.ZoneCalculator
+import com.legbeat.service.CadenceTrackingService
 import com.legbeat.analytics.repository.RideRepository
 import com.legbeat.core.model.CadenceSample
 import com.legbeat.core.model.CadenceZone
@@ -123,6 +125,13 @@ fun PostRideSummaryScreen(
                         scope.launch {
                             withContext(Dispatchers.IO) {
                                 rideRepository.deleteRide(toDeleteId)
+                            }
+                            if (CadenceTrackingService.currentRideId.value == toDeleteId) {
+                                val stopIntent = Intent(context, CadenceTrackingService::class.java).apply {
+                                    action = CadenceTrackingService.ACTION_STOP
+                                }
+                                context.startService(stopIntent)
+                                CadenceTrackingService.resetTrackingState()
                             }
                             Toast.makeText(context, "Workout deleted", Toast.LENGTH_SHORT).show()
                             showDeleteDialog = false

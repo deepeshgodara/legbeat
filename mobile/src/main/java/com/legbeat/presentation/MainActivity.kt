@@ -9,6 +9,7 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -108,6 +109,11 @@ fun MainNavigation(
 
     var currentScreen by remember {
         mutableStateOf<Screen>(if (isTracking) Screen.ActiveRide else Screen.Dashboard)
+    }
+
+    // Intercept back button/gesture on any sub-screen and return to Dashboard
+    BackHandler(enabled = currentScreen !is Screen.Dashboard) {
+        currentScreen = Screen.Dashboard
     }
 
     // Auto navigate to ActiveRide if tracking is started elsewhere (e.g. notification / auto-start)

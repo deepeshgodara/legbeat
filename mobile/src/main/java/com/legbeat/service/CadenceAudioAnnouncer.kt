@@ -43,15 +43,15 @@ class CadenceAudioAnnouncer @Inject constructor(
         }
     }
 
-    fun speakCadence(rpm: Int) {
+    fun speakCadence(rpm: Int, isAverage: Boolean = false) {
         if (!isInitialized || tts == null) {
             initTts()
             return
         }
-        val text = if (rpm <= 0) {
-            "Cadence zero"
+        val text = if (isAverage) {
+            if (rpm <= 0) "Average zero" else "Average $rpm RPM"
         } else {
-            "$rpm RPM"
+            if (rpm <= 0) "Cadence zero" else "$rpm RPM"
         }
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "CADENCE_ANNOUNCE_${System.currentTimeMillis()}")
     }

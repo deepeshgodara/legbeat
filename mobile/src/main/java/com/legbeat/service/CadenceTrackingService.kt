@@ -15,6 +15,7 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.legbeat.analytics.repository.RideRepository
 import com.legbeat.core.dsp.CadenceEstimate
@@ -48,28 +49,30 @@ class CadenceTrackingService : Service(), SensorEventListener {
     lateinit var wearMessageSender: WearableMessageSender
 
     @Inject
-    lateinit var audioAnnouncer: CadenceAudioAnnouncer
-
-    @Inject
     lateinit var voiceSettings: VoiceSettingsRepository
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Inject
+    lateinit var audioAnnouncer: CadenceAudioAnnouncer
+
+    private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var processingJob: Job? = null
 
     private lateinit var sensorManager: SensorManager
     private var linearAccelSensor: Sensor? = null
     private var proximitySensor: Sensor? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    @Volatile private var isPhoneInPocket: Boolean = true
 
     private val pipeline = SignalProcessingPipeline()
+    private var rideStartTimeMs = 0L
+    private var rideId = ""
     private val recordedSamples = mutableListOf<CadenceSample>()
-
-    private var rideStartTimeMs: Long = 0L
-    private var rideId: String = ""
+    private var isPhoneInPocket = true
 
     override fun onCreate() {
         super.onCreate()
+        if (!serviceScope.isActive) {
+            serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        }
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         linearAccelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
         proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
@@ -90,11 +93,15 @@ class CadenceTrackingService : Service(), SensorEventListener {
             ACTION_START -> startTracking()
             ACTION_STOP -> stopTracking()
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startTracking() {
         if (_isTracking.value) return
+
+        if (!serviceScope.isActive) {
+            serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        }
 
         wakeLock?.acquire(4 * 60 * 60 * 1000L) // 4 hours maximum safety timeout
         rideStartTimeMs = System.currentTimeMillis()
@@ -111,6 +118,7 @@ class CadenceTrackingService : Service(), SensorEventListener {
             }
         }
 
+        _lastFinishedRideId.value = null
         _isTracking.value = true
         _currentRideId.value = rideId
 
@@ -130,6 +138,7 @@ class CadenceTrackingService : Service(), SensorEventListener {
         }
 
         var lastAnnouncementTimeMs = System.currentTimeMillis()
+        val intervalRpmSamples = mutableListOf<Int>()
 
         // Periodic 500ms cadence estimation loop (2 Hz)
         processingJob = serviceScope.launch {
@@ -156,12 +165,23 @@ class CadenceTrackingService : Service(), SensorEventListener {
                     if (rpm > 0) {
                         recordedSamples.add(CadenceSample(now, rpm))
                     }
+                    intervalRpmSamples.add(rpm)
 
-                    // Voice Dictation: dictate current cadence after every user-specified interval
+                    // Voice Dictation: dictate cadence after every user-specified interval
                     val intervalMs = voiceSettings.announcementIntervalSec.value * 1000L
                     if (voiceSettings.isVoiceEnabled.value && (now - lastAnnouncementTimeMs >= intervalMs)) {
                         lastAnnouncementTimeMs = now
-                        audioAnnouncer.speakCadence(rpm)
+                        if (voiceSettings.isAnnounceAverageIntervalEnabled.value) {
+                            val avgRpm = if (intervalRpmSamples.isNotEmpty()) {
+                                intervalRpmSamples.average().toInt()
+                            } else {
+                                rpm
+                            }
+                            audioAnnouncer.speakCadence(avgRpm, isAverage = true)
+                        } else {
+                            audioAnnouncer.speakCadence(rpm, isAverage = false)
+                        }
+                        intervalRpmSamples.clear()
                     }
 
                     // Stream to Wear OS
@@ -176,6 +196,12 @@ class CadenceTrackingService : Service(), SensorEventListener {
 
     private fun stopTracking() {
         if (!_isTracking.value) return
+
+        // Immediately update state so UI and system know tracking has stopped
+        _isTracking.value = false
+        _currentCadence.value = 0
+        _currentZone.value = CadenceZone.IDLE
+        _currentRideId.value = null
 
         sensorManager.unregisterListener(this)
         processingJob?.cancel()
@@ -203,17 +229,18 @@ class CadenceTrackingService : Service(), SensorEventListener {
         val samplesSnapshot = recordedSamples.toList()
 
         serviceScope.launch {
-            rideRepository.saveRide(ride, samplesSnapshot)
-            _lastFinishedRideId.value = rideId
-
-            // Clean up wake lock and foreground state
-            if (wakeLock?.isHeld == true) {
-                wakeLock?.release()
+            try {
+                rideRepository.saveRide(ride, samplesSnapshot)
+                _lastFinishedRideId.value = ride.id
+            } catch (e: Exception) {
+                Log.e("CadenceTrackingService", "Error saving ride", e)
+            } finally {
+                if (wakeLock?.isHeld == true) {
+                    wakeLock?.release()
+                }
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             }
-            _isTracking.value = false
-            _currentCadence.value = 0
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
         }
     }
 
@@ -307,6 +334,9 @@ class CadenceTrackingService : Service(), SensorEventListener {
             wakeLock?.release()
         }
         _isTracking.value = false
+        _currentCadence.value = 0
+        _currentZone.value = CadenceZone.IDLE
+        _currentRideId.value = null
         audioAnnouncer.shutdown()
     }
 
@@ -335,5 +365,17 @@ class CadenceTrackingService : Service(), SensorEventListener {
 
         private val _isPhoneInPocketState = MutableStateFlow(true)
         val isPhoneInPocketState = _isPhoneInPocketState.asStateFlow()
+
+        fun clearLastFinishedRideId() {
+            _lastFinishedRideId.value = null
+        }
+
+        fun resetTrackingState() {
+            _isTracking.value = false
+            _currentCadence.value = 0
+            _currentZone.value = CadenceZone.IDLE
+            _currentRideId.value = null
+            _lastFinishedRideId.value = null
+        }
     }
 }

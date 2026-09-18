@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.PlayArrow
@@ -89,8 +90,16 @@ fun DashboardScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        val toDelete = targetRide
                         scope.launch(Dispatchers.IO) {
-                            rideRepository.deleteRide(targetRide.id)
+                            rideRepository.deleteRide(toDelete.id)
+                        }
+                        if (CadenceTrackingService.currentRideId.value == toDelete.id) {
+                            val stopIntent = Intent(context, CadenceTrackingService::class.java).apply {
+                                action = CadenceTrackingService.ACTION_STOP
+                            }
+                            context.startService(stopIntent)
+                            CadenceTrackingService.resetTrackingState()
                         }
                         rideToDelete = null
                     },
@@ -178,7 +187,30 @@ fun DashboardScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            if (isTracking) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    TextButton(
+                        onClick = {
+                            val stopIntent = Intent(context, CadenceTrackingService::class.java).apply {
+                                action = CadenceTrackingService.ACTION_STOP
+                            }
+                            context.startService(stopIntent)
+                            CadenceTrackingService.resetTrackingState()
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF5252))
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Stop & Reset Tracking", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
                 text = "Past Rides",

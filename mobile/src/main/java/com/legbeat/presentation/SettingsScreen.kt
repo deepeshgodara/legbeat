@@ -5,6 +5,7 @@ import android.hardware.SensorManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -284,20 +287,25 @@ fun SettingsScreen(
                             onValueChange = { input ->
                                 if (input.all { it.isDigit() } && input.length <= 4) {
                                     customIntervalInput = input
-                                    input.toIntOrNull()?.let { sec ->
-                                        if (sec >= 5) {
-                                            voiceSettings.setAnnouncementInterval(sec)
-                                        }
-                                    }
                                 }
                             },
-                            label = { Text("Custom Seconds", color = Color.Gray, fontSize = 12.sp) },
+                            label = { Text("Custom Seconds (min 5s)", color = Color.Gray, fontSize = 12.sp) },
+                            supportingText = {
+                                val entered = customIntervalInput.toIntOrNull()
+                                if (entered != null && entered < 5) {
+                                    Text("Minimum allowed interval is 5 seconds", color = Color(0xFFFF5252), fontSize = 11.sp)
+                                } else {
+                                    Text("Allowed: 5 to 600 seconds", color = Color.Gray, fontSize = 11.sp)
+                                }
+                            },
+                            isError = customIntervalInput.isNotEmpty() && (customIntervalInput.toIntOrNull() ?: 0) < 5,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
                                 focusedBorderColor = ElectricYellow,
-                                unfocusedBorderColor = Color.DarkGray
+                                unfocusedBorderColor = Color.DarkGray,
+                                errorBorderColor = Color(0xFFFF5252)
                             ),
                             singleLine = true,
                             modifier = Modifier.weight(1f)
@@ -305,9 +313,17 @@ fun SettingsScreen(
 
                         Button(
                             onClick = {
-                                val sec = customIntervalInput.toIntOrNull() ?: 15
-                                voiceSettings.setAnnouncementInterval(sec)
-                                Toast.makeText(context, "Interval set to $sec seconds", Toast.LENGTH_SHORT).show()
+                                val entered = customIntervalInput.toIntOrNull()
+                                if (entered == null || entered < 5) {
+                                    Toast.makeText(context, "Minimum interval is 5 seconds", Toast.LENGTH_SHORT).show()
+                                    voiceSettings.setAnnouncementInterval(5)
+                                    customIntervalInput = "5"
+                                } else {
+                                    val clamped = entered.coerceIn(5, 600)
+                                    voiceSettings.setAnnouncementInterval(clamped)
+                                    customIntervalInput = clamped.toString()
+                                    Toast.makeText(context, "Interval set to $clamped seconds", Toast.LENGTH_SHORT).show()
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = ElectricMint,
@@ -317,6 +333,43 @@ fun SettingsScreen(
                             modifier = Modifier.height(56.dp)
                         ) {
                             Text("Set", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Checkbox: Announce average cadence for last announcement interval
+                    val isAnnounceAverage by voiceSettings.isAnnounceAverageIntervalEnabled.collectAsState()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF2C2C2E).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .clickable { voiceSettings.setAnnounceAverageIntervalEnabled(!isAnnounceAverage) }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = isAnnounceAverage,
+                            onCheckedChange = { voiceSettings.setAnnounceAverageIntervalEnabled(it) },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = ElectricYellow,
+                                uncheckedColor = Color.Gray,
+                                checkmarkColor = Color.Black
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Announce Average for Interval",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Announces the average cadence computed over the last interval rather than instantaneous RPM.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.LightGray
+                            )
                         }
                     }
 

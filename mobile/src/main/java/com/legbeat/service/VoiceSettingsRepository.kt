@@ -32,6 +32,9 @@ class VoiceSettingsRepository @Inject constructor(
     private val _isMeasureOnlyInPocketEnabled = MutableStateFlow(prefs.getBoolean(KEY_MEASURE_ONLY_IN_POCKET, false))
     val isMeasureOnlyInPocketEnabled: StateFlow<Boolean> = _isMeasureOnlyInPocketEnabled.asStateFlow()
 
+    private val _isAnnounceAverageIntervalEnabled = MutableStateFlow(prefs.getBoolean(KEY_ANNOUNCE_AVERAGE_INTERVAL, false))
+    val isAnnounceAverageIntervalEnabled: StateFlow<Boolean> = _isAnnounceAverageIntervalEnabled.asStateFlow()
+
     fun setVoiceEnabled(enabled: Boolean) {
         _isVoiceEnabled.value = enabled
         prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
@@ -64,6 +67,11 @@ class VoiceSettingsRepository @Inject constructor(
         prefs.edit().putBoolean(KEY_MEASURE_ONLY_IN_POCKET, enabled).apply()
     }
 
+    fun setAnnounceAverageIntervalEnabled(enabled: Boolean) {
+        _isAnnounceAverageIntervalEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_ANNOUNCE_AVERAGE_INTERVAL, enabled).apply()
+    }
+
     companion object {
         private const val KEY_ENABLED = "voice_dictation_enabled"
         private const val KEY_INTERVAL = "voice_dictation_interval_sec"
@@ -71,5 +79,6 @@ class VoiceSettingsRepository @Inject constructor(
         private const val KEY_POCKET_MODE_RIDE = "pocket_mode_active_during_ride"
         private const val KEY_SENSITIVITY = "sensor_sensitivity_percent"
         private const val KEY_MEASURE_ONLY_IN_POCKET = "measure_only_in_pocket"
+        private const val KEY_ANNOUNCE_AVERAGE_INTERVAL = "announce_average_interval_enabled"
     }
 }

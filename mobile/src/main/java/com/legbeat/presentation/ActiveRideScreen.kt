@@ -126,6 +126,7 @@ fun ActiveRideScreen(
     // React to ride completion
     LaunchedEffect(lastFinishedRideId) {
         lastFinishedRideId?.let { rideId ->
+            CadenceTrackingService.clearLastFinishedRideId()
             onRideFinished(rideId)
         }
     }
