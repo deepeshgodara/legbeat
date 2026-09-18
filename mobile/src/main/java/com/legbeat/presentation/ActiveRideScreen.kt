@@ -75,6 +75,9 @@ fun ActiveRideScreen(
     val isVoiceEnabled by voiceSettings.isVoiceEnabled.collectAsState()
     val voiceIntervalSec by voiceSettings.announcementIntervalSec.collectAsState()
     val isPocketModeActive by voiceSettings.isPocketModeActiveDuringRide.collectAsState()
+    val isMeasureOnlyInPocket by voiceSettings.isMeasureOnlyInPocketEnabled.collectAsState()
+    val isPhoneInPocketByService by CadenceTrackingService.isPhoneInPocketState.collectAsState()
+    val isMeasurementPaused = isMeasureOnlyInPocket && !isPhoneInPocketByService
 
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
     var isPhoneInPocket by remember { mutableStateOf(false) }
@@ -164,15 +167,18 @@ fun ActiveRideScreen(
 
             // Central Cadence Gauge
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // Zone Tag
+                // Zone Tag / Paused Status
                 Box(
                     modifier = Modifier
-                        .background(Color(zone.colorHex).copy(alpha = 0.2f), shape = RoundedCornerShape(16.dp))
+                        .background(
+                            if (isMeasurementPaused) ElectricMint.copy(alpha = 0.2f) else Color(zone.colorHex).copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        text = if (cadence == 0) "COASTING" else zone.label.uppercase(),
-                        color = if (cadence == 0) Color.Gray else Color(zone.colorHex),
+                        text = if (isMeasurementPaused) "PAUSED • NOT IN POCKET" else if (cadence == 0) "COASTING" else zone.label.uppercase(),
+                        color = if (isMeasurementPaused) ElectricMint else if (cadence == 0) Color.Gray else Color(zone.colorHex),
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 1.sp
                     )
@@ -182,21 +188,21 @@ fun ActiveRideScreen(
 
                 // Huge High-Contrast RPM value
                 Text(
-                    text = if (cadence == 0) "--" else cadence.toString(),
+                    text = if (isMeasurementPaused || cadence == 0) "--" else cadence.toString(),
                     style = MaterialTheme.typography.displayLarge.copy(
                         fontSize = 96.sp,
                         fontWeight = FontWeight.Black,
                         fontFamily = FontFamily.Monospace,
-                        color = if (cadence == 0) Color.DarkGray else ElectricYellow
+                        color = if (isMeasurementPaused || cadence == 0) Color.DarkGray else ElectricYellow
                     ),
                     textAlign = TextAlign.Center
                 )
 
                 Text(
-                    text = "PEDALING CADENCE (RPM)",
+                    text = if (isMeasurementPaused) "MEASUREMENT PAUSED (POCKET REQUIRED)" else "PEDALING CADENCE (RPM)",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.LightGray
+                    color = if (isMeasurementPaused) ElectricMint else Color.LightGray
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))

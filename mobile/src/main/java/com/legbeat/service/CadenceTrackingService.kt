@@ -58,7 +58,9 @@ class CadenceTrackingService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private var linearAccelSensor: Sensor? = null
+    private var proximitySensor: Sensor? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile private var isPhoneInPocket: Boolean = true
 
     private val pipeline = SignalProcessingPipeline()
     private val recordedSamples = mutableListOf<CadenceSample>()
@@ -70,6 +72,7 @@ class CadenceTrackingService : Service(), SensorEventListener {
         super.onCreate()
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         linearAccelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
@@ -99,6 +102,7 @@ class CadenceTrackingService : Service(), SensorEventListener {
         recordedSamples.clear()
         pipeline.reset()
         pipeline.setSensitivity(voiceSettings.sensorSensitivityPercent.value)
+        isPhoneInPocket = true
 
         // Dynamically update pipeline sensitivity if modified in Settings
         serviceScope.launch {
@@ -117,9 +121,12 @@ class CadenceTrackingService : Service(), SensorEventListener {
             wearMessageSender.openAppOnWatch()
         }
 
-        // Register sensor listener (SENSOR_DELAY_GAME ~50 Hz)
+        // Register sensor listeners
         linearAccelSensor?.let { sensor ->
             sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
+        }
+        proximitySensor?.let { sensor ->
+            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
         }
 
         var lastAnnouncementTimeMs = System.currentTimeMillis()
@@ -128,31 +135,41 @@ class CadenceTrackingService : Service(), SensorEventListener {
         processingJob = serviceScope.launch {
             while (isActive) {
                 delay(500L)
-                val estimate: CadenceEstimate = pipeline.processWindow()
                 val now = System.currentTimeMillis()
-                val rpm = estimate.rpm
-                val zone = CadenceZone.fromRpm(rpm)
-
-                _currentCadence.value = rpm
-                _currentZone.value = zone
-
-                if (rpm > 0) {
-                    recordedSamples.add(CadenceSample(now, rpm))
-                }
-
-                // Voice Dictation: dictate current cadence after every user-specified interval
-                val intervalMs = voiceSettings.announcementIntervalSec.value * 1000L
-                if (voiceSettings.isVoiceEnabled.value && (now - lastAnnouncementTimeMs >= intervalMs)) {
-                    lastAnnouncementTimeMs = now
-                    audioAnnouncer.speakCadence(rpm)
-                }
-
-                // Stream to Wear OS
-                wearMessageSender.sendCadence(rpm, zone.code, now)
-
-                // Update notification
                 val elapsedMin = (now - rideStartTimeMs) / 60000L
-                updateNotification("$rpm RPM", "$elapsedMin min elapsed • ${zone.label}")
+
+                val measureOnlyInPocket = voiceSettings.isMeasureOnlyInPocketEnabled.value
+                if (measureOnlyInPocket && !isPhoneInPocket) {
+                    // Pocket required for measurement, but phone is not in pocket
+                    _currentCadence.value = 0
+                    _currentZone.value = CadenceZone.IDLE
+                    wearMessageSender.sendCadence(0, CadenceZone.IDLE.code, now)
+                    updateNotification("Paused (Out of Pocket)", "$elapsedMin min elapsed • Waiting for pocket detection")
+                } else {
+                    val estimate: CadenceEstimate = pipeline.processWindow()
+                    val rpm = estimate.rpm
+                    val zone = CadenceZone.fromRpm(rpm)
+
+                    _currentCadence.value = rpm
+                    _currentZone.value = zone
+
+                    if (rpm > 0) {
+                        recordedSamples.add(CadenceSample(now, rpm))
+                    }
+
+                    // Voice Dictation: dictate current cadence after every user-specified interval
+                    val intervalMs = voiceSettings.announcementIntervalSec.value * 1000L
+                    if (voiceSettings.isVoiceEnabled.value && (now - lastAnnouncementTimeMs >= intervalMs)) {
+                        lastAnnouncementTimeMs = now
+                        audioAnnouncer.speakCadence(rpm)
+                    }
+
+                    // Stream to Wear OS
+                    wearMessageSender.sendCadence(rpm, zone.code, now)
+
+                    // Update notification
+                    updateNotification("$rpm RPM", "$elapsedMin min elapsed • ${zone.label}")
+                }
             }
         }
     }
@@ -201,11 +218,22 @@ class CadenceTrackingService : Service(), SensorEventListener {
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (event == null || event.sensor.type != Sensor.TYPE_LINEAR_ACCELERATION) return
-        val x = event.values[0]
-        val y = event.values[1]
-        val z = event.values[2]
-        pipeline.onSensorSample(event.timestamp, x, y, z)
+        if (event == null) return
+        when (event.sensor.type) {
+            Sensor.TYPE_LINEAR_ACCELERATION -> {
+                val x = event.values[0]
+                val y = event.values[1]
+                val z = event.values[2]
+                pipeline.onSensorSample(event.timestamp, x, y, z)
+            }
+            Sensor.TYPE_PROXIMITY -> {
+                val distance = event.values[0]
+                val maxRange = proximitySensor?.maximumRange ?: 5.0f
+                val inPocket = distance < maxRange && distance <= 5.0f
+                isPhoneInPocket = inPocket
+                _isPhoneInPocketState.value = inPocket
+            }
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -304,5 +332,8 @@ class CadenceTrackingService : Service(), SensorEventListener {
 
         private val _lastFinishedRideId = MutableStateFlow<String?>(null)
         val lastFinishedRideId = _lastFinishedRideId.asStateFlow()
+
+        private val _isPhoneInPocketState = MutableStateFlow(true)
+        val isPhoneInPocketState = _isPhoneInPocketState.asStateFlow()
     }
 }

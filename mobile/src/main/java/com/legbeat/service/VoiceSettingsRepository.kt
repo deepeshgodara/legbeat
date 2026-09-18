@@ -29,6 +29,9 @@ class VoiceSettingsRepository @Inject constructor(
     private val _sensorSensitivityPercent = MutableStateFlow(prefs.getInt(KEY_SENSITIVITY, 50))
     val sensorSensitivityPercent: StateFlow<Int> = _sensorSensitivityPercent.asStateFlow()
 
+    private val _isMeasureOnlyInPocketEnabled = MutableStateFlow(prefs.getBoolean(KEY_MEASURE_ONLY_IN_POCKET, false))
+    val isMeasureOnlyInPocketEnabled: StateFlow<Boolean> = _isMeasureOnlyInPocketEnabled.asStateFlow()
+
     fun setVoiceEnabled(enabled: Boolean) {
         _isVoiceEnabled.value = enabled
         prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
@@ -56,11 +59,17 @@ class VoiceSettingsRepository @Inject constructor(
         prefs.edit().putInt(KEY_SENSITIVITY, clamped).apply()
     }
 
+    fun setMeasureOnlyInPocketEnabled(enabled: Boolean) {
+        _isMeasureOnlyInPocketEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_MEASURE_ONLY_IN_POCKET, enabled).apply()
+    }
+
     companion object {
         private const val KEY_ENABLED = "voice_dictation_enabled"
         private const val KEY_INTERVAL = "voice_dictation_interval_sec"
         private const val KEY_POCKET_AUTO_START = "pocket_auto_start_enabled"
         private const val KEY_POCKET_MODE_RIDE = "pocket_mode_active_during_ride"
         private const val KEY_SENSITIVITY = "sensor_sensitivity_percent"
+        private const val KEY_MEASURE_ONLY_IN_POCKET = "measure_only_in_pocket"
     }
 }

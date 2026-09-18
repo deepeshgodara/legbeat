@@ -542,6 +542,47 @@ fun SettingsScreen(
                 }
             }
 
+            // Measure Only In Pocket Card
+            val isMeasureOnlyInPocket by voiceSettings.isMeasureOnlyInPocketEnabled.collectAsState()
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Sensors, contentDescription = null, tint = ElectricMint)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Measure Only In Pocket",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Switch(
+                            checked = isMeasureOnlyInPocket,
+                            onCheckedChange = { voiceSettings.setMeasureOnlyInPocketEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = ElectricMint
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Calculates pedaling cadence only when the proximity sensor detects the phone is inside your pocket. Automatically pauses measurement and ignores arm movement when holding the phone.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray
+                    )
+                }
+            }
+
             // Pedaling Sensor Sensitivity Card
             val sensitivity by voiceSettings.sensorSensitivityPercent.collectAsState()
             Card(
