@@ -63,6 +63,15 @@
             android:exported="false"
             android:foregroundServiceType="health" />
 
+        <!-- Diagnostic Wear OS Test Broadcast Receiver -->
+        <receiver
+            android:name=".wear.TestWearReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.legbeat.action.TEST_WEAR" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

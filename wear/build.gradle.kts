@@ -11,7 +11,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.legbeat.wear"
+        applicationId = "com.legbeat"
         minSdk = 30
         targetSdk = 35
         versionCode = 1

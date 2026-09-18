@@ -16,6 +16,13 @@ The application modules have been built, verified, and installed onto the Androi
 | :---: | :---: | :---: |
 | <img src="docs/screenshots/mobile_ride_summary.png" width="260" alt="Ride Summary" /> | <img src="docs/screenshots/mobile_settings.png" width="260" alt="Scrolled Summary & Health Connect" /> | <img src="docs/screenshots/wear_cadence_active.png" width="260" alt="Wear OS Heads-Up Cadence" /> |
 
+### ⌚ Physical Hardware Verification (Samsung Galaxy Watch 4 Classic)
+The Wear OS companion app has been deployed and verified live on **Samsung Galaxy Watch 4 Classic** (`SM-R895F`) paired over **pure Bluetooth** with a **Google Pixel 10a**:
+
+| **Recovery Zone (88 RPM)** | **Tempo Zone (105 RPM)** | **High Spin Zone (130 RPM)** |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/galaxy_watch_4_recovery_88rpm.png" width="240" alt="Galaxy Watch 4 - Recovery 88 RPM" /> | <img src="docs/screenshots/galaxy_watch_4_tempo_105rpm.png" width="240" alt="Galaxy Watch 4 - Tempo 105 RPM" /> | <img src="docs/screenshots/galaxy_watch_4_highspin_130rpm.png" width="240" alt="Galaxy Watch 4 - High Spin 130 RPM" /> |
+
 ---
 
 ## 🎙️ Periodic Voice Cadence Dictation (Pocket Audio Coach)
@@ -29,10 +36,13 @@ When cycling with a smartphone in a jersey pocket, looking down at a screen can 
 
 ---
 
-## ⌚ Wear OS Heads-Up Display (`:wear`)
+## ⌚ Wear OS Pure Bluetooth Architecture (`:wear`)
 
-A dedicated Wear OS companion app provides a high-contrast heads-up cadence display:
-- **Low-Latency Streaming**: Streams timestamped binary packets from the phone over Google Play Services Wearable Data Layer (`/legbeat/cadence`).
+A dedicated Wear OS companion app connects to the handheld device over pure Bluetooth using the official Google Play Services Wearable Data Layer:
+- **Zero Wi-Fi or Socket Overhead**: Operates purely over Bluetooth via Google Play Services `MessageClient`, `CapabilityClient`, and `NodeClient`.
+- **Unified Package Identifier**: Handheld (`:mobile`) and Wear OS (`:wear`) both share the unified `applicationId = "com.legbeat"` required by Play Services Data Layer routing.
+- **Dynamic Capability Discovery**: Mobile discovers paired watches advertising `legbeat_cadence_display` capability via `res/values/wear.xml`.
+- **In-App Watch Status & Diagnostics**: Mobile Settings screen provides live paired watch status (`Nearby (BT)`) and a single-tap test trigger (`Test Bluetooth Watch Link (88 RPM)`).
 - **Maximum Sunlight Legibility**: Rendered with **74sp** extra-bold typography in Electric Yellow and color-coded cadence zone badges (Recovery, Endurance, Tempo, High-Spin).
 - **Watchdog Timer**: Automatically falls back to `"--"` if no cadence packet arrives within the timeout window.
 - **Ambient Mode Support**: Leverages `AmbientLifecycleObserver` with burn-in protection and reduced-rate monochrome rendering when the cyclist's wrist is lowered.

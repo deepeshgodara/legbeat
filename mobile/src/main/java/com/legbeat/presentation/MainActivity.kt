@@ -21,6 +21,7 @@ import javax.inject.Inject
 
 import com.legbeat.service.CadenceAudioAnnouncer
 import com.legbeat.service.VoiceSettingsRepository
+import com.legbeat.wear.WearableMessageSender
 
 sealed class Screen {
     data object Dashboard : Screen()
@@ -53,6 +54,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var audioAnnouncer: CadenceAudioAnnouncer
 
+    @Inject
+    lateinit var wearMessageSender: WearableMessageSender
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -64,7 +68,8 @@ class MainActivity : ComponentActivity() {
                     zoneCalculator = zoneCalculator,
                     coachingEngine = coachingEngine,
                     voiceSettings = voiceSettings,
-                    audioAnnouncer = audioAnnouncer
+                    audioAnnouncer = audioAnnouncer,
+                    wearMessageSender = wearMessageSender
                 )
             }
         }
@@ -79,7 +84,8 @@ fun MainNavigation(
     zoneCalculator: ZoneCalculator,
     coachingEngine: OfflineCoachingEngine,
     voiceSettings: VoiceSettingsRepository,
-    audioAnnouncer: CadenceAudioAnnouncer
+    audioAnnouncer: CadenceAudioAnnouncer,
+    wearMessageSender: WearableMessageSender
 ) {
     val isTracking by CadenceTrackingService.isTracking.collectAsState()
     var currentScreen by remember {
@@ -119,6 +125,7 @@ fun MainNavigation(
                 healthConnectManager = healthConnectManager,
                 voiceSettings = voiceSettings,
                 audioAnnouncer = audioAnnouncer,
+                wearMessageSender = wearMessageSender,
                 onBack = { currentScreen = Screen.Dashboard }
             )
         }

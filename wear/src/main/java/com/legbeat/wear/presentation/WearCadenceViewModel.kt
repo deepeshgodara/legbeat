@@ -56,8 +56,10 @@ class WearCadenceViewModel @Inject constructor(
     }
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
+        android.util.Log.d("WearCadenceVM", "onMessageReceived: ${messageEvent.path}")
         if (messageEvent.path == CadencePacket.CADENCE_PATH) {
             val packet = CadencePacket.parse(messageEvent.data)
+            android.util.Log.d("WearCadenceVM", "parsed packet: $packet")
             if (packet != null) {
                 handlePacket(packet)
             }
@@ -65,6 +67,7 @@ class WearCadenceViewModel @Inject constructor(
     }
 
     private fun handlePacket(packet: CadencePacket) {
+        android.util.Log.d("WearCadenceVM", "handlePacket: rpm=${packet.rpm}, zone=${packet.zone}")
         watchdog.feed(viewModelScope)
         _uiState.value = _uiState.value.copy(
             rpm = if (packet.rpm > 0) packet.rpm else null,

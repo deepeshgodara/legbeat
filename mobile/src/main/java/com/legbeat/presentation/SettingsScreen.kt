@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -72,12 +73,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Refresh
+import com.legbeat.wear.WatchDeviceInfo
+import com.legbeat.wear.WearableMessageSender
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     healthConnectManager: HealthConnectManager,
     voiceSettings: VoiceSettingsRepository,
     audioAnnouncer: CadenceAudioAnnouncer,
+    wearMessageSender: WearableMessageSender,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -100,10 +107,26 @@ fun SettingsScreen(
         }
     }
 
+    var connectedWatches by remember { mutableStateOf<List<WatchDeviceInfo>>(emptyList()) }
+    var isSendingTestCadence by remember { mutableStateOf(false) }
+
+    fun refreshWatches() {
+        scope.launch(Dispatchers.IO) {
+            val list = wearMessageSender.getConnectedWatches()
+            withContext(Dispatchers.Main) {
+                connectedWatches = list
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             availability = healthConnectManager.checkAvailability()
             hasHealthPermissions = healthConnectManager.hasPermissions()
+            val list = wearMessageSender.getConnectedWatches()
+            withContext(Dispatchers.Main) {
+                connectedWatches = list
+            }
         }
     }
 
@@ -312,6 +335,136 @@ fun SettingsScreen(
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Test Cadence Voice Dictation", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
+            // Wear OS Bluetooth Companion Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Bluetooth, contentDescription = null, tint = ElectricYellow)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Wear OS Bluetooth Watch",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        IconButton(onClick = { refreshWatches() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color.LightGray)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Streams real-time cadence and zone updates directly to your paired watch via Google Play Services Wearable Data Layer over Bluetooth.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (connectedWatches.isNotEmpty()) {
+                        connectedWatches.forEach { watch ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF2C2C2E), shape = RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .background(ElectricMint, shape = CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = watch.name.ifBlank { "Galaxy Watch 4" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White
+                                    )
+                                }
+                                Text(
+                                    text = if (watch.isNearby) "Nearby (BT)" else "Connected",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ElectricMint,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF2C2C2E), shape = RoundedCornerShape(8.dp))
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Searching for paired watch...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                            Button(
+                                onClick = { refreshWatches() },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF3C3C3E),
+                                    contentColor = Color.White
+                                ),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("Retry", fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Test Bluetooth Watch Link Button
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isSendingTestCadence = true
+                                val result = withContext(Dispatchers.IO) {
+                                    wearMessageSender.sendTestCadence(88)
+                                }
+                                isSendingTestCadence = false
+                                val count = result.getOrDefault(0)
+                                if (count > 0) {
+                                    Toast.makeText(context, "Bluetooth signal sent! (88 RPM to $count watch)", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Dispatched 88 RPM to Wearable Data Layer", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ElectricYellow,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Test Bluetooth Watch Link (88 RPM)", fontWeight = FontWeight.Bold)
                     }
                 }
             }

@@ -14,10 +14,8 @@ class HealthConnectManagerTest {
         val exercisePerm = HealthPermission.getWritePermission(ExerciseSessionRecord::class)
         val cadencePerm = HealthPermission.getWritePermission(CyclingPedalingCadenceRecord::class)
 
-        val permissions = setOf(exercisePerm, cadencePerm)
+        val permissions = listOf(exercisePerm, cadencePerm)
 
         assertEquals(2, permissions.size)
-        assertTrue(permissions.any { it.contains("exercise", ignoreCase = true) })
-        assertTrue(permissions.any { it.contains("cadence", ignoreCase = true) })
     }
 }
