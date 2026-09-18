@@ -83,8 +83,41 @@ class WearableMessageSender(
         return sendCadence(rpm, 1, System.currentTimeMillis())
     }
 
+    suspend fun openAppOnWatch(): Result<Int> = runCatching {
+        val capabilityNodes = try {
+            val cap = capabilityClient.getCapability(CAPABILITY_CADENCE_DISPLAY, CapabilityClient.FILTER_REACHABLE).await()
+            cap.nodes
+        } catch (_: Exception) {
+            emptySet()
+        }
+
+        val targetNodes = if (capabilityNodes.isNotEmpty()) {
+            capabilityNodes
+        } else {
+            nodeClient.connectedNodes.await().toSet()
+        }
+
+        if (targetNodes.isEmpty()) {
+            android.util.Log.w("WearableSender", "openAppOnWatch: No target watch nodes found!")
+            return@runCatching 0
+        }
+
+        var successCount = 0
+        for (node in targetNodes) {
+            try {
+                messageClient.sendMessage(node.id, OPEN_APP_PATH, ByteArray(0)).await()
+                android.util.Log.d("WearableSender", "Sent open app command to ${node.displayName}")
+                successCount++
+            } catch (e: Exception) {
+                android.util.Log.e("WearableSender", "Failed sending open app command to ${node.displayName}", e)
+            }
+        }
+        successCount
+    }
+
     companion object {
         const val CADENCE_PATH = "/legbeat/cadence"
+        const val OPEN_APP_PATH = "/legbeat/open_app"
         const val CAPABILITY_CADENCE_DISPLAY = "legbeat_cadence_display"
     }
 }

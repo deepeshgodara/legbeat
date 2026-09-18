@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Unified Leg Motion and EKG Pulse -->
+    <path
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 38 28 C 48 28, 53 38, 48 48 C 43 58, 38 63, 43 73 C 48 78, 55 78, 60 78 L 65 42 L 73 84 L 78 58 L 84 58">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="35"
+                android:startY="25"
+                android:endX="85"
+                android:endY="85"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#00E5FF" />
+                <item android:offset="0.5" android:color="#00B8D4" />
+                <item android:offset="1.0" android:color="#002B2E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Wear OS Badge Circle -->
+    <path
+        android:fillColor="#002B2E"
+        android:pathData="M 76 64 A 10 10 0 1 0 76 84 A 10 10 0 1 0 76 64 Z" />
+    <!-- Wear OS Badge Symbol -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 73 69 V 79 M 73 69 H 77 C 79.5 69, 79.5 73.5, 77 73.5 H 73 M 76 73.5 L 79 79" />
+</vector>

@@ -22,10 +22,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -36,11 +38,16 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,6 +61,8 @@ import com.legbeat.core.model.Ride
 import com.legbeat.presentation.theme.ElectricMint
 import com.legbeat.presentation.theme.ElectricYellow
 import com.legbeat.service.CadenceTrackingService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -67,8 +76,36 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val rides by rideRepository.getAllRides().collectAsState(initial = emptyList())
     val isTracking by CadenceTrackingService.isTracking.collectAsState()
+    var rideToDelete by remember { mutableStateOf<Ride?>(null) }
+
+    rideToDelete?.let { targetRide ->
+        AlertDialog(
+            onDismissRequest = { rideToDelete = null },
+            title = { Text("Delete Workout", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to delete this ride? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            rideRepository.deleteRide(targetRide.id)
+                        }
+                        rideToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF5252))
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { rideToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -188,7 +225,11 @@ fun DashboardScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(rides, key = { it.id }) { ride ->
-                        RideHistoryCard(ride = ride, onClick = { onRideSelected(ride.id) })
+                        RideHistoryCard(
+                            ride = ride,
+                            onClick = { onRideSelected(ride.id) },
+                            onDelete = { rideToDelete = ride }
+                        )
                     }
                 }
             }
@@ -199,7 +240,8 @@ fun DashboardScreen(
 @Composable
 fun RideHistoryCard(
     ride: Ride,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val dateFormat = SimpleDateFormat("MMM dd, yyyy • HH:mm", Locale.getDefault())
     val dateString = dateFormat.format(Date(ride.startTimeMs))
@@ -219,7 +261,7 @@ fun RideHistoryCard(
             ) {
                 Text(dateString, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
 
-                // Health Connect Status Badge
+                // Health Connect Status Badge and Delete Action
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = if (ride.healthConnectSynced) Icons.Default.CheckCircle else Icons.Default.Sync,
@@ -233,6 +275,18 @@ fun RideHistoryCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = if (ride.healthConnectSynced) ElectricMint else Color.Gray
                     )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Workout",
+                            tint = Color(0xFFFF5252),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 

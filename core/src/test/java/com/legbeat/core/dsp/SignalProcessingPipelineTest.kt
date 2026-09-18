@@ -86,4 +86,59 @@ class SignalProcessingPipelineTest {
         // 0.35 * 130 + 0.65 * 90 = 45.5 + 58.5 = 104
         assertEquals(104, smoothed)
     }
+
+    @Test
+    fun `detects low cadence 30 RPM from 0_5 Hz periodic acceleration`() {
+        val pipeline = SignalProcessingPipeline()
+        val freqHz = 0.50 // 0.50 Hz * 60 = 30 RPM
+        val sampleIntervalNs = 20_000_000L // 50 Hz = 20 ms
+        val totalSamples = 150 // 3.0 seconds
+
+        for (i in 0 until totalSamples) {
+            val tSec = (i * sampleIntervalNs) / 1_000_000_000.0
+            val accel = (2.2 * sin(2.0 * PI * freqHz * tSec)).toFloat()
+            val timestampNs = i * sampleIntervalNs
+            pipeline.onSensorSample(timestampNs, 0f, accel, 0f)
+        }
+
+        val estimate = pipeline.processWindow()
+        assertFalse("Should not be coasting with active pedaling at 30 RPM", estimate.isCoasting)
+        assertEquals(30.0, estimate.rpm.toDouble(), 3.0)
+    }
+
+    @Test
+    fun `detects 45 RPM cadence from 0_75 Hz periodic acceleration`() {
+        val pipeline = SignalProcessingPipeline()
+        val freqHz = 0.75 // 0.75 Hz * 60 = 45 RPM
+        val sampleIntervalNs = 20_000_000L
+        val totalSamples = 150
+
+        for (i in 0 until totalSamples) {
+            val tSec = (i * sampleIntervalNs) / 1_000_000_000.0
+            val accel = (2.0 * sin(2.0 * PI * freqHz * tSec)).toFloat()
+            val timestampNs = i * sampleIntervalNs
+            pipeline.onSensorSample(timestampNs, accel, 0f, 0f)
+        }
+
+        val estimate = pipeline.processWindow()
+        assertFalse("Should not be coasting", estimate.isCoasting)
+        assertEquals(45.0, estimate.rpm.toDouble(), 3.0)
+    }
+
+    @Test
+    fun `sensitivity adjustment scales noise threshold and detection`() {
+        val pipeline = SignalProcessingPipeline()
+        // 50% sensitivity default
+        assertEquals(0.35, pipeline.extractor.noiseRmsThreshold, 0.001)
+
+        // 100% sensitivity (highest)
+        pipeline.setSensitivity(100)
+        assertEquals(0.10, pipeline.extractor.noiseRmsThreshold, 0.001)
+        assertEquals(0.10, pipeline.extractor.minPeakRatio, 0.001)
+
+        // 0% sensitivity (lowest)
+        pipeline.setSensitivity(0)
+        assertEquals(0.60, pipeline.extractor.noiseRmsThreshold, 0.001)
+        assertEquals(0.25, pipeline.extractor.minPeakRatio, 0.001)
+    }
 }

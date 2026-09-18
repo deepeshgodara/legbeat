@@ -1,14 +1,24 @@
 package com.legbeat.presentation
 
+import android.content.Context
+import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import com.legbeat.analytics.engine.OfflineCoachingEngine
 import com.legbeat.analytics.engine.ZoneCalculator
 import com.legbeat.analytics.repository.RideRepository
@@ -18,6 +28,11 @@ import com.legbeat.presentation.theme.LegBeatTheme
 import com.legbeat.service.CadenceTrackingService
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 import com.legbeat.service.CadenceAudioAnnouncer
 import com.legbeat.service.VoiceSettingsRepository
@@ -87,9 +102,74 @@ fun MainNavigation(
     audioAnnouncer: CadenceAudioAnnouncer,
     wearMessageSender: WearableMessageSender
 ) {
+    val context = LocalContext.current
     val isTracking by CadenceTrackingService.isTracking.collectAsState()
+    val isPocketAutoStart by voiceSettings.isPocketAutoStartEnabled.collectAsState()
+
     var currentScreen by remember {
         mutableStateOf<Screen>(if (isTracking) Screen.ActiveRide else Screen.Dashboard)
+    }
+
+    // Auto navigate to ActiveRide if tracking is started elsewhere (e.g. notification / auto-start)
+    LaunchedEffect(isTracking) {
+        if (isTracking && currentScreen !is Screen.ActiveRide) {
+            currentScreen = Screen.ActiveRide
+        }
+    }
+
+    // Pocket Auto-Start: Listen to proximity sensor when enabled and not actively tracking
+    DisposableEffect(isPocketAutoStart, isTracking) {
+        if (!isPocketAutoStart || isTracking) {
+            return@DisposableEffect onDispose {}
+        }
+
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        val proximitySensor = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+            ?: return@DisposableEffect onDispose {}
+
+        var debounceJob: Job? = null
+        val coroutineScope = CoroutineScope(Dispatchers.Main)
+
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                if (event == null || event.sensor.type != Sensor.TYPE_PROXIMITY) return
+                val distance = event.values[0]
+                val maxRange = proximitySensor.maximumRange
+                val isNear = distance < maxRange && distance <= 5.0f
+
+                if (isNear) {
+                    if (debounceJob == null || debounceJob?.isActive == false) {
+                        debounceJob = coroutineScope.launch {
+                            delay(1200L)
+                            if (!isTracking) {
+                                audioAnnouncer.speakCustom("Pocket detected. Starting ride tracking.")
+                                val startIntent = Intent(context, CadenceTrackingService::class.java).apply {
+                                    action = CadenceTrackingService.ACTION_START
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    context.startForegroundService(startIntent)
+                                } else {
+                                    context.startService(startIntent)
+                                }
+                                currentScreen = Screen.ActiveRide
+                            }
+                        }
+                    }
+                } else {
+                    debounceJob?.cancel()
+                    debounceJob = null
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        sensorManager.registerListener(listener, proximitySensor, SensorManager.SENSOR_DELAY_NORMAL)
+
+        onDispose {
+            debounceJob?.cancel()
+            sensorManager.unregisterListener(listener)
+        }
     }
 
     when (val screen = currentScreen) {

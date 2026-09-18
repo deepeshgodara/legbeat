@@ -63,11 +63,14 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.text.input.KeyboardType
 import com.legbeat.service.CadenceAudioAnnouncer
+import kotlin.math.roundToInt
 import com.legbeat.service.VoiceSettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -465,6 +468,135 @@ fun SettingsScreen(
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Test Bluetooth Watch Link (88 RPM)", fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Open App on Watch Button
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    wearMessageSender.openAppOnWatch()
+                                }
+                                val count = result.getOrDefault(0)
+                                if (count > 0) {
+                                    Toast.makeText(context, "Opening LegBeat on your watch...", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Dispatched open app command to watch", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2C2C2E),
+                            contentColor = ElectricYellow
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Open App on Watch", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
+            // Pocket Auto-Start Card
+            val isPocketAutoStart by voiceSettings.isPocketAutoStartEnabled.collectAsState()
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Sensors, contentDescription = null, tint = ElectricYellow)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Pocket Auto-Start",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Switch(
+                            checked = isPocketAutoStart,
+                            onCheckedChange = { voiceSettings.setPocketAutoStartEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = ElectricYellow
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Automatically starts cadence tracking whenever the proximity sensor detects the phone is placed in your cycling pocket for future rides.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray
+                    )
+                }
+            }
+
+            // Pedaling Sensor Sensitivity Card
+            val sensitivity by voiceSettings.sensorSensitivityPercent.collectAsState()
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Sensors, contentDescription = null, tint = ElectricYellow)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Pedaling Sensor Sensitivity",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Text(
+                            text = "$sensitivity%",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = ElectricYellow
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Fine-tune movement threshold from 30 to 180 RPM. Higher sensitivity detects gentle leg spin in high gears; lower sensitivity rejects rough road vibration.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Slider(
+                        value = sensitivity.toFloat(),
+                        onValueChange = { voiceSettings.setSensorSensitivityPercent(it.roundToInt()) },
+                        valueRange = 0f..100f,
+                        steps = 99,
+                        colors = SliderDefaults.colors(
+                            thumbColor = ElectricYellow,
+                            activeTrackColor = ElectricYellow,
+                            inactiveTrackColor = Color.DarkGray
+                        )
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("0% (Strict)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text("50% (Default)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text("100% (High)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     }
                 }
             }

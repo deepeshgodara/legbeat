@@ -1,6 +1,7 @@
 package com.legbeat.wear.presentation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +27,10 @@ import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
 
 @Composable
-fun WearCadenceScreen(viewModel: WearCadenceViewModel) {
+fun WearCadenceScreen(
+    viewModel: WearCadenceViewModel,
+    onExit: () -> Unit = {}
+) {
     val state by viewModel.uiState.collectAsState()
 
     Scaffold(
@@ -96,6 +100,26 @@ fun WearCadenceScreen(viewModel: WearCadenceViewModel) {
                     color = if (state.isAmbient) Color.Gray else Color.LightGray,
                     letterSpacing = 2.sp
                 )
+
+                // Sleek Exit Button (visible only in interactive non-ambient mode)
+                if (!state.isAmbient) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFF222225), shape = RoundedCornerShape(12.dp))
+                            .clickable(onClick = onExit)
+                            .padding(horizontal = 14.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "✕ EXIT",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFB0B0B5),
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
             }
         }
     }

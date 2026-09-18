@@ -20,9 +20,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -36,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -97,6 +100,7 @@ fun PostRideSummaryScreen(
     var isExportingFit by remember { mutableStateOf(false) }
     var healthSyncedState by remember { mutableStateOf(false) }
     var fitExportPath by remember { mutableStateOf<String?>(null) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(rideId) {
         val loadedRide = withContext(Dispatchers.IO) { rideRepository.getRideById(rideId) }
@@ -107,6 +111,37 @@ fun PostRideSummaryScreen(
         fitExportPath = loadedRide?.fitFilePath
     }
 
+    if (showDeleteDialog && ride != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Workout", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to delete this workout? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val toDeleteId = ride?.id ?: return@TextButton
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                rideRepository.deleteRide(toDeleteId)
+                            }
+                            Toast.makeText(context, "Workout deleted", Toast.LENGTH_SHORT).show()
+                            showDeleteDialog = false
+                            onBack()
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF5252))
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -114,6 +149,15 @@ fun PostRideSummaryScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showDeleteDialog = true }) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete Workout",
+                            tint = Color(0xFFFF5252)
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -386,6 +430,22 @@ fun PostRideSummaryScreen(
                     Text(
                         text = if (fitExportPath != null) "FIT File Ready (Strava/TrainingPeaks)" else "Export Garmin .FIT File",
                         color = Color.White
+                    )
+                }
+
+                // "Delete Workout" Button
+                OutlinedButton(
+                    onClick = { showDeleteDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF5252))
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFF5252))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Delete Workout",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFFF5252)
                     )
                 }
             }

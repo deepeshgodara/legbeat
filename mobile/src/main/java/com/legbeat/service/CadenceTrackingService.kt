@@ -98,11 +98,24 @@ class CadenceTrackingService : Service(), SensorEventListener {
         rideId = UUID.randomUUID().toString()
         recordedSamples.clear()
         pipeline.reset()
+        pipeline.setSensitivity(voiceSettings.sensorSensitivityPercent.value)
+
+        // Dynamically update pipeline sensitivity if modified in Settings
+        serviceScope.launch {
+            voiceSettings.sensorSensitivityPercent.collect { percent ->
+                pipeline.setSensitivity(percent)
+            }
+        }
 
         _isTracking.value = true
         _currentRideId.value = rideId
 
         startForegroundServiceNotification("0 RPM", "Starting ride tracking...")
+
+        // Automatically launch companion app on connected watch
+        serviceScope.launch {
+            wearMessageSender.openAppOnWatch()
+        }
 
         // Register sensor listener (SENSOR_DELAY_GAME ~50 Hz)
         linearAccelSensor?.let { sensor ->

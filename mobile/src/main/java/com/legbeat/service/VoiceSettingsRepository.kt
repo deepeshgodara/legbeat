@@ -20,6 +20,15 @@ class VoiceSettingsRepository @Inject constructor(
     private val _announcementIntervalSec = MutableStateFlow(prefs.getInt(KEY_INTERVAL, 15))
     val announcementIntervalSec: StateFlow<Int> = _announcementIntervalSec.asStateFlow()
 
+    private val _isPocketAutoStartEnabled = MutableStateFlow(prefs.getBoolean(KEY_POCKET_AUTO_START, false))
+    val isPocketAutoStartEnabled: StateFlow<Boolean> = _isPocketAutoStartEnabled.asStateFlow()
+
+    private val _isPocketModeActiveDuringRide = MutableStateFlow(prefs.getBoolean(KEY_POCKET_MODE_RIDE, true))
+    val isPocketModeActiveDuringRide: StateFlow<Boolean> = _isPocketModeActiveDuringRide.asStateFlow()
+
+    private val _sensorSensitivityPercent = MutableStateFlow(prefs.getInt(KEY_SENSITIVITY, 50))
+    val sensorSensitivityPercent: StateFlow<Int> = _sensorSensitivityPercent.asStateFlow()
+
     fun setVoiceEnabled(enabled: Boolean) {
         _isVoiceEnabled.value = enabled
         prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
@@ -31,8 +40,27 @@ class VoiceSettingsRepository @Inject constructor(
         prefs.edit().putInt(KEY_INTERVAL, clamped).apply()
     }
 
+    fun setPocketAutoStartEnabled(enabled: Boolean) {
+        _isPocketAutoStartEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_POCKET_AUTO_START, enabled).apply()
+    }
+
+    fun setPocketModeActiveDuringRide(enabled: Boolean) {
+        _isPocketModeActiveDuringRide.value = enabled
+        prefs.edit().putBoolean(KEY_POCKET_MODE_RIDE, enabled).apply()
+    }
+
+    fun setSensorSensitivityPercent(percent: Int) {
+        val clamped = percent.coerceIn(0, 100)
+        _sensorSensitivityPercent.value = clamped
+        prefs.edit().putInt(KEY_SENSITIVITY, clamped).apply()
+    }
+
     companion object {
         private const val KEY_ENABLED = "voice_dictation_enabled"
         private const val KEY_INTERVAL = "voice_dictation_interval_sec"
+        private const val KEY_POCKET_AUTO_START = "pocket_auto_start_enabled"
+        private const val KEY_POCKET_MODE_RIDE = "pocket_mode_active_during_ride"
+        private const val KEY_SENSITIVITY = "sensor_sensitivity_percent"
     }
 }

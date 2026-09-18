@@ -14,15 +14,27 @@ data class CadenceEstimate(
 
 /**
  * Extracts pedaling cadence from the power spectrum.
- * Restricts search to human cycling band: 1.0 Hz (60 RPM) to 2.5 Hz (150 RPM).
+ * Restricts search to human cycling band: 0.40 Hz (24 RPM) to 3.0 Hz (180 RPM),
+ * comfortably covering pedaling cadences down to 30 RPM.
  * Applies parabolic interpolation for sub-bin frequency accuracy and checks noise floor.
  */
 class CadenceExtractor(
-    val minFreqHz: Double = 1.0,
-    val maxFreqHz: Double = 2.5,
-    val noiseRmsThreshold: Double = 0.35,
-    val minPeakRatio: Double = 0.18
+    val minFreqHz: Double = 0.40,
+    val maxFreqHz: Double = 3.0,
+    var noiseRmsThreshold: Double = 0.35,
+    var minPeakRatio: Double = 0.18
 ) {
+    /**
+     * Adjusts sensitivity level from 0% (least sensitive, high movement required)
+     * to 100% (most sensitive, detects subtle pedaling strokes).
+     */
+    fun setSensitivity(percent: Int) {
+        val clamped = percent.coerceIn(0, 100) / 100.0
+        // 0% -> 0.60 (least sensitive), 50% -> 0.35 (default), 100% -> 0.10 (most sensitive)
+        noiseRmsThreshold = 0.60 - (clamped * 0.50)
+        // 0% -> 0.25 (stricter purity), 50% -> 0.18, 100% -> 0.10
+        minPeakRatio = 0.25 - (clamped * 0.15)
+    }
     /**
      * Extracts the estimated RPM from the power spectrum.
      * @param powerSpectrum Array of size N/2
@@ -87,7 +99,7 @@ class CadenceExtractor(
 
         val refinedBin = peakBin + delta
         val dominantFreqHz = refinedBin * freqResolution
-        val rawRpm = (dominantFreqHz * 60.0).roundToInt().coerceIn(60, 160)
+        val rawRpm = (dominantFreqHz * 60.0).roundToInt().coerceIn(30, 180)
         val confidence = peakRatio.toFloat().coerceIn(0f, 1f)
 
         return CadenceEstimate(

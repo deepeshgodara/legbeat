@@ -51,7 +51,10 @@ class WearCadenceActivity : ComponentActivity() {
 
         setContent {
             LegBeatWearTheme {
-                WearCadenceScreen(viewModel = viewModel)
+                WearCadenceScreen(
+                    viewModel = viewModel,
+                    onExit = { finish() }
+                )
             }
         }
 

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <defs>
+    <linearGradient id="legBeatGradient" x1="35" y1="25" x2="85" y2="85" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00E5FF" />
+      <stop offset="50%" stop-color="#00B8D4" />
+      <stop offset="100%" stop-color="#002b2e" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Unified Leg Motion and EKG Pulse as one continuous stroke -->
+  <path d="M 38 28 C 48 28, 53 38, 48 48 C 43 58, 38 63, 43 73 C 48 78, 55 78, 60 78 L 65 42 L 73 84 L 78 58 L 84 58" 
+        fill="none" stroke="url(#legBeatGradient)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

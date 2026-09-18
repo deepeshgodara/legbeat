@@ -66,6 +66,10 @@ class SignalProcessingPipeline(
         return estimate.copy(rpm = smoothedRpm)
     }
 
+    fun setSensitivity(percent: Int) {
+        extractor.setSensitivity(percent)
+    }
+
     fun reset() {
         buffer.clear()
         smoother.reset()
