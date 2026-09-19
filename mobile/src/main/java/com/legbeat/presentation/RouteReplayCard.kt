@@ -265,8 +265,8 @@ fun RouteReplayCard(
                             mapView.apply {
                                 getMapAsync { map ->
                                     maplibreMapRef = map
-                                    val darkMatterStyle = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-                                    map.setStyle(Style.Builder().fromUri(darkMatterStyle)) { _ ->
+                                    val openFreeMapStyle = "https://tiles.openfreemap.org/styles/liberty"
+                                    map.setStyle(Style.Builder().fromUri(openFreeMapStyle)) { _ ->
                                         // Plot Route Polyline
                                         val points = gpsSamples.map { LatLng(it.latitude!!, it.longitude!!) }
                                         if (points.isNotEmpty()) {

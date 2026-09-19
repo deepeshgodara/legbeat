@@ -78,10 +78,8 @@ dependencies {
     implementation(libs.vico.core)
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)
-    // Location and Mapping
+    // Location and Mapping (MapLibre Native - Zero API keys, zero cost)
     implementation(libs.play.services.location)
-    implementation(libs.play.services.maps)
-    implementation(libs.google.maps.compose)
     implementation(libs.maplibre.android)
 
     // Testing

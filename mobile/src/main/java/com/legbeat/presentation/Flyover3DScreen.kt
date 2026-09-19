@@ -89,39 +89,7 @@ import org.maplibre.android.maps.Style
 import java.io.File
 import java.util.Locale
 
-private const val TERRAIN_STYLE_JSON = """
-{
-  "version": 8,
-  "sources": {
-    "carto-dark": {
-      "type": "raster",
-      "tiles": [
-        "https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png"
-      ],
-      "tileSize": 256
-    },
-    "terrain-dem": {
-      "type": "raster-dem",
-      "tiles": [
-        "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png"
-      ],
-      "tileSize": 256,
-      "encoding": "terrarium"
-    }
-  },
-  "layers": [
-    {
-      "id": "carto-dark-layer",
-      "type": "raster",
-      "source": "carto-dark"
-    }
-  ],
-  "terrain": {
-    "source": "terrain-dem",
-    "exaggeration": 1.5
-  }
-}
-"""
+private const val OPEN_FREE_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
 @Composable
 fun Flyover3DDialog(
@@ -318,7 +286,7 @@ fun Flyover3DScreen(
                 mapView.apply {
                     getMapAsync { map ->
                         maplibreMapRef = map
-                        map.setStyle(Style.Builder().fromJson(TERRAIN_STYLE_JSON)) { _ ->
+                        map.setStyle(Style.Builder().fromUri(OPEN_FREE_MAP_STYLE_URL)) { _ ->
                             val points = gpsSamples.map { LatLng(it.latitude!!, it.longitude!!) }
                             if (points.isNotEmpty()) {
                                 // Draw glowing yellow route polyline
