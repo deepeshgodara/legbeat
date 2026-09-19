@@ -25,9 +25,16 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.core.content.FileProvider
 import com.legbeat.service.FlyoverSettingsRepository
+import com.legbeat.video.FlyoverVideoGenerator
 import com.legbeat.video.FlyoverVideoRecorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -112,6 +119,12 @@ fun PostRideSummaryScreen(
     var showFlyoverDialog by remember { mutableStateOf(false) }
     var hasCheckedShortRide by remember(rideId) { mutableStateOf(false) }
 
+    var isGeneratingVideo by remember { mutableStateOf(false) }
+    var videoGenerationProgress by remember { mutableFloatStateOf(0f) }
+    var videoGenerationStatus by remember { mutableStateOf("") }
+    var latestFlyoverVideo by remember { mutableStateOf<File?>(null) }
+    var showVideoSuccessDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(rideId) {
         val loadedRide = withContext(Dispatchers.IO) { rideRepository.getRideById(rideId) }
         val loadedSamples = withContext(Dispatchers.IO) { rideRepository.getSamplesForRide(rideId) }
@@ -119,6 +132,7 @@ fun PostRideSummaryScreen(
         samples = loadedSamples
         healthSyncedState = loadedRide?.healthConnectSynced == true
         fitExportPath = loadedRide?.fitFilePath
+        latestFlyoverVideo = FlyoverVideoRecorder.findLatestVideoForRide(context, rideId)
         if (!hasCheckedShortRide && loadedRide != null) {
             val isShort = loadedRide.durationMs < 90_000L || loadedSamples.size < 10
             if (isShort) {
@@ -209,13 +223,139 @@ fun PostRideSummaryScreen(
     }
 
     val effectiveFlyoverSettings = flyoverSettings ?: remember { FlyoverSettingsRepository(context) }
+    val videoGenerator = remember { FlyoverVideoGenerator(context) }
+
+    fun startVideoGeneration() {
+        val currentRide = ride ?: return
+        val gpsSamples = samples.filter { it.latitude != null && it.longitude != null }
+        if (gpsSamples.size < 2) {
+            Toast.makeText(context, "Cannot generate video: at least 2 GPS coordinates required", Toast.LENGTH_LONG).show()
+            return
+        }
+        isGeneratingVideo = true
+        videoGenerationProgress = 0.05f
+        videoGenerationStatus = "Initializing 3D video rendering engine..."
+        scope.launch {
+            val file = videoGenerator.generateVideo(
+                ride = currentRide,
+                samples = samples,
+                settings = effectiveFlyoverSettings,
+                onProgress = { prog, status ->
+                    videoGenerationProgress = prog
+                    videoGenerationStatus = status
+                }
+            )
+            isGeneratingVideo = false
+            if (file != null && file.exists()) {
+                latestFlyoverVideo = file
+                showVideoSuccessDialog = true
+                Toast.makeText(context, "3D Flyover Video Generated!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Video generation failed. Please try again.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    if (isGeneratingVideo) {
+        AlertDialog(
+            onDismissRequest = { /* Modal during hardware encoding */ },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        color = ElectricYellow,
+                        strokeWidth = 2.5.dp
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Rendering 3D Video", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = videoGenerationStatus,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LinearProgressIndicator(
+                        progress = { videoGenerationProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp),
+                        color = ElectricYellow,
+                        trackColor = Color(0xFF333333)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "${(videoGenerationProgress * 100).toInt()}% completed",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ElectricMint,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    if (showVideoSuccessDialog && latestFlyoverVideo != null) {
+        AlertDialog(
+            onDismissRequest = { showVideoSuccessDialog = false },
+            title = {
+                Text("🎬 3D Flyover Video Ready!", fontWeight = FontWeight.Bold, color = ElectricYellow)
+            },
+            text = {
+                Column {
+                    Text("Your cinematic 3D workout flyover video has been successfully rendered and saved to your device gallery.")
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "File: ${latestFlyoverVideo?.name ?: ""}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray
+                    )
+                    val mb = (latestFlyoverVideo?.length() ?: 0L) / (1024.0 * 1024.0)
+                    Text(
+                        text = String.format(Locale.US, "Size: %.2f MB • 720p HD MP4", mb),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ElectricMint,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        latestFlyoverVideo?.let { file ->
+                            val shareIntent = FlyoverVideoRecorder.createShareIntent(context, file)
+                            context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video to Apps"))
+                        }
+                        showVideoSuccessDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricMint, contentColor = Color.Black)
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Share Video Now", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVideoSuccessDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 
     if (showFlyoverDialog && ride != null) {
         Flyover3DDialog(
             ride = ride!!,
             samples = samples,
             flyoverSettings = effectiveFlyoverSettings,
-            onDismiss = { showFlyoverDialog = false }
+            onDismiss = {
+                showFlyoverDialog = false
+                latestFlyoverVideo = FlyoverVideoRecorder.findLatestVideoForRide(context, ride!!.id)
+            }
         )
     }
 
@@ -571,46 +711,172 @@ fun PostRideSummaryScreen(
                     )
                 }
 
-                // "Share 3D Flyover Video" Button (if video exists)
-                val latestFlyoverVideo = remember(currentRide.id, showFlyoverDialog) {
-                    FlyoverVideoRecorder.findLatestVideoForRide(context, currentRide.id)
-                }
-                if (latestFlyoverVideo != null && latestFlyoverVideo.exists()) {
-                    Button(
-                        onClick = {
-                            val shareIntent = FlyoverVideoRecorder.createShareIntent(context, latestFlyoverVideo)
-                            context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = ElectricMint, contentColor = Color.Black),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, tint = Color.Black)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Share 3D Flyover Video",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Black
-                        )
-                    }
-                }
-
-                // "Generate 3D Flyover Video" Button
+                // 3D Flyover Video Section (Always present if GPS points exist)
                 val hasGpsRoute = samples.any { it.latitude != null && it.longitude != null }
                 if (hasGpsRoute) {
-                    OutlinedButton(
-                        onClick = { showFlyoverDialog = true },
+                    Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ElectricYellow)
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = ElectricYellow)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Generate 3D Flyover Video",
-                            fontWeight = FontWeight.Bold,
-                            color = ElectricYellow
-                        )
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Videocam,
+                                        contentDescription = null,
+                                        tint = ElectricYellow,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "3D Flyover Video",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                                val video = latestFlyoverVideo
+                                if (video != null && video.exists()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0x3300E676)
+                                    ) {
+                                        Text(
+                                            text = "VIDEO READY",
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 10.sp,
+                                            color = ElectricMint,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val currentVideo = latestFlyoverVideo
+                            if (currentVideo != null && currentVideo.exists()) {
+                                // Video Output Card Details
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF1E1E1E)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            text = currentVideo.name,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            maxLines = 1
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        val mb = currentVideo.length() / (1024.0 * 1024.0)
+                                        Text(
+                                            text = String.format(Locale.US, "%.2f MB • 720p HD MP4 • Saved in Movies/LegBeat", mb),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Prominent SHARE BUTTON
+                                Button(
+                                    onClick = {
+                                        val shareIntent = FlyoverVideoRecorder.createShareIntent(context, currentVideo)
+                                        context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video to Apps"))
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = ElectricMint, contentColor = Color.Black),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.Black)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Share Video to Other Apps",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        color = Color.Black
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // PLAY BUTTON
+                                    OutlinedButton(
+                                        onClick = {
+                                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", currentVideo)
+                                            val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                setDataAndType(uri, "video/mp4")
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(Intent.createChooser(playIntent, "Play 3D Flyover Video"))
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlayCircle, contentDescription = null, tint = Color.White)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Play Video", color = Color.White)
+                                    }
+
+                                    // REGENERATE BUTTON
+                                    OutlinedButton(
+                                        onClick = { startVideoGeneration() },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ElectricYellow)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = ElectricYellow)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Re-render", color = ElectricYellow)
+                                    }
+                                }
+                            } else {
+                                // No Video Generated Yet
+                                Text(
+                                    text = "Generate a cinematic 3D workout route flyover video with your selected tilt angle and map layer style.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.LightGray
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Button(
+                                    onClick = { startVideoGeneration() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = ElectricYellow, contentColor = Color.Black),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Generate 3D Flyover Video", fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Interactive 3D Map Preview
+                            OutlinedButton(
+                                onClick = { showFlyoverDialog = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Videocam, contentDescription = null, tint = Color.LightGray)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Interactive 3D Map Preview", color = Color.LightGray)
+                            }
+                        }
                     }
                 }
 

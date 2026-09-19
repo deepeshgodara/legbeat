@@ -20,9 +20,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.rememberCoroutineScope
+import com.legbeat.video.FlyoverVideoGenerator
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -164,6 +170,38 @@ fun Flyover3DScreen(
         mutableStateOf(FlyoverVideoRecorder.findLatestVideoForRide(context, ride.id))
     }
     var showSavedDialog by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+    val videoGenerator = remember { FlyoverVideoGenerator(context) }
+    var isGeneratingDirectVideo by remember { mutableStateOf(false) }
+    var directVideoProgress by remember { mutableFloatStateOf(0f) }
+    var directVideoStatus by remember { mutableStateOf("") }
+
+    fun generateDirectVideo(onSuccess: (File) -> Unit = {}) {
+        isGeneratingDirectVideo = true
+        directVideoProgress = 0.05f
+        directVideoStatus = "Initializing 3D video rendering engine..."
+        scope.launch {
+            val file = videoGenerator.generateVideo(
+                ride = ride,
+                samples = samples,
+                settings = flyoverSettings,
+                onProgress = { prog, status ->
+                    directVideoProgress = prog
+                    directVideoStatus = status
+                }
+            )
+            isGeneratingDirectVideo = false
+            if (file != null && file.exists()) {
+                recordedFile = file
+                existingVideoFile = file
+                showSavedDialog = true
+                onSuccess(file)
+            } else {
+                Toast.makeText(context, "Video generation failed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // Settings State
     val savedTilt by flyoverSettings.cameraTiltAngle.collectAsState()
@@ -376,7 +414,8 @@ fun Flyover3DScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 40.dp, start = 12.dp, end = 12.dp)
+                .statusBarsPadding()
+                .padding(top = 10.dp, start = 12.dp, end = 12.dp)
                 .align(Alignment.TopCenter),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -506,25 +545,30 @@ fun Flyover3DScreen(
                     }
                 }
 
-                // Video Share Button (available if a video is recorded or exists)
+                // Video Share Button (Always visible)
                 val videoToShare = recordedFile ?: existingVideoFile
-                if (videoToShare != null && videoToShare.exists()) {
-                    Surface(
-                        shape = CircleShape,
-                        color = ElectricYellow,
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        IconButton(onClick = {
+                Surface(
+                    shape = CircleShape,
+                    color = if (videoToShare != null && videoToShare.exists()) ElectricYellow else Color(0xCC333333),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    IconButton(onClick = {
+                        if (videoToShare != null && videoToShare.exists()) {
                             val shareIntent = FlyoverVideoRecorder.createShareIntent(context, videoToShare)
                             context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
-                        }) {
-                            Icon(
-                                Icons.Default.Share,
-                                contentDescription = "Share Video",
-                                tint = Color.Black,
-                                modifier = Modifier.size(18.dp)
-                            )
+                        } else {
+                            generateDirectVideo { newFile ->
+                                val shareIntent = FlyoverVideoRecorder.createShareIntent(context, newFile)
+                                context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
+                            }
                         }
+                    }) {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = "Share Video",
+                            tint = if (videoToShare != null && videoToShare.exists()) Color.Black else Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
 
@@ -625,7 +669,8 @@ fun Flyover3DScreen(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter),
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
             color = Color(0xEE121212)
         ) {
             Column(
@@ -706,48 +751,28 @@ fun Flyover3DScreen(
                         }
                     }
 
-                    // Record MP4 Button
-                    if (isRecordingVideo) {
-                        Button(
-                            onClick = {
-                                val file = videoRecorder.stopRecording()
-                                isRecordingVideo = false
-                                recordedFile = file
-                                existingVideoFile = file
-                                if (file != null && file.exists()) {
-                                    showSavedDialog = true
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Stop Recording", fontWeight = FontWeight.Bold)
-                        }
-                    } else {
-                        Button(
-                            onClick = {
-                                val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                                screenCaptureLauncher.launch(manager.createScreenCaptureIntent())
-                                progressFraction = 0f
-                                isPlaying = true
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = ElectricMint,
-                                contentColor = Color.Black
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.FiberManualRecord,
-                                contentDescription = null,
-                                tint = Color.Red,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Export MP4 Video", fontWeight = FontWeight.Bold)
-                        }
+                    // Export & Share MP4 Button
+                    Button(
+                        onClick = {
+                            generateDirectVideo { file ->
+                                val shareIntent = FlyoverVideoRecorder.createShareIntent(context, file)
+                                context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ElectricMint,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Export & Share MP4", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -844,39 +869,71 @@ fun Flyover3DScreen(
         )
     }
 
-    // Video Saved Success Dialog with Prominent Share Video Button
-    if (showSavedDialog && recordedFile != null) {
-        val file = recordedFile!!
+    if (isGeneratingDirectVideo) {
         AlertDialog(
-            onDismissRequest = { showSavedDialog = false },
-            title = { Text("3D Flyover Video Saved!", fontWeight = FontWeight.Bold) },
+            onDismissRequest = {},
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), color = ElectricYellow, strokeWidth = 2.5.dp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Rendering 3D Video", fontWeight = FontWeight.Bold)
+                }
+            },
             text = {
                 Column {
-                    Text("Your cinematic 3D flyover video has been recorded and saved to Movies/LegBeat.")
+                    Text(directVideoStatus, style = MaterialTheme.typography.bodyMedium, color = Color.LightGray)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LinearProgressIndicator(
+                        progress = { directVideoProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp),
+                        color = ElectricYellow,
+                        trackColor = Color(0xFF333333)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("${(directVideoProgress * 100).toInt()}% completed", style = MaterialTheme.typography.labelSmall, color = ElectricMint, fontWeight = FontWeight.Bold)
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // Video Saved Success Dialog with Prominent Share Video Button
+    val fileToShare = recordedFile ?: existingVideoFile
+    if (showSavedDialog && fileToShare != null) {
+        AlertDialog(
+            onDismissRequest = { showSavedDialog = false },
+            title = { Text("🎬 3D Flyover Video Saved!", fontWeight = FontWeight.Bold, color = ElectricYellow) },
+            text = {
+                Column {
+                    Text("Your cinematic 3D flyover video has been rendered and saved to Movies/LegBeat.")
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        file.name,
+                        fileToShare.name,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
                         color = Color.LightGray
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    val mb = fileToShare.length() / (1024.0 * 1024.0)
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Click 'Share Video' to send to WhatsApp, Strava, Instagram, or any other app.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ElectricMint
+                        String.format(Locale.US, "Size: %.2f MB • 720p HD MP4", mb),
+                        color = ElectricMint,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val shareIntent = FlyoverVideoRecorder.createShareIntent(context, file)
+                        val shareIntent = FlyoverVideoRecorder.createShareIntent(context, fileToShare)
                         context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = ElectricYellow, contentColor = Color.Black)
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricMint, contentColor = Color.Black)
                 ) {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Share, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Share Video", fontWeight = FontWeight.Bold)
                 }
