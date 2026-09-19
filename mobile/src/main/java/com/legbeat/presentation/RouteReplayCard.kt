@@ -1,5 +1,6 @@
 package com.legbeat.presentation
 
+import android.content.Intent
 import android.graphics.Color as AndroidColor
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -18,16 +19,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,8 +42,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,6 +67,9 @@ import com.legbeat.core.model.CadenceZone
 import com.legbeat.core.model.Ride
 import com.legbeat.presentation.theme.ElectricMint
 import com.legbeat.presentation.theme.ElectricYellow
+import com.legbeat.service.FlyoverSettingsRepository
+import com.legbeat.service.MapLayerType
+import com.legbeat.video.FlyoverVideoRecorder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import org.maplibre.android.annotations.Marker
@@ -75,6 +83,7 @@ import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import java.io.File
 import java.util.Locale
 
 @Composable
@@ -82,10 +91,21 @@ fun RouteReplayCard(
     ride: Ride,
     samples: List<CadenceSample>,
     modifier: Modifier = Modifier,
+    flyoverSettings: FlyoverSettingsRepository? = null,
     onLaunch3DFlyover: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val settings = flyoverSettings ?: remember { FlyoverSettingsRepository(context) }
+    val currentSavedLayer by settings.mapLayer.collectAsState()
+    var activeLayer by remember { mutableStateOf(currentSavedLayer) }
+    var showLayerMenu by remember { mutableStateOf(false) }
+
+    // Check if a pre-rendered flyover video exists for this workout
+    val existingVideoFile = remember(ride.id) {
+        FlyoverVideoRecorder.findLatestVideoForRide(context, ride.id)
+    }
 
     // Filter samples with valid GPS coordinates
     val gpsSamples = remember(samples) {
@@ -120,14 +140,35 @@ fun RouteReplayCard(
                     )
                 }
 
-                if (gpsSamples.isNotEmpty() && onLaunch3DFlyover != null) {
-                    TextButton(
-                        onClick = onLaunch3DFlyover,
-                        colors = ButtonDefaults.textButtonColors(contentColor = ElectricYellow)
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Share Video button if a 3D flyover video exists
+                    if (existingVideoFile != null && existingVideoFile.exists()) {
+                        IconButton(
+                            onClick = {
+                                val shareIntent = FlyoverVideoRecorder.createShareIntent(context, existingVideoFile)
+                                context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = "Share Video",
+                                tint = ElectricYellow,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("3D Flyover", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+
+                    if (gpsSamples.isNotEmpty() && onLaunch3DFlyover != null) {
+                        TextButton(
+                            onClick = onLaunch3DFlyover,
+                            colors = ButtonDefaults.textButtonColors(contentColor = ElectricYellow)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("3D Flyover", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -174,13 +215,49 @@ fun RouteReplayCard(
                 val totalDurationMs = ride.durationMs.coerceAtLeast(1000L).toFloat()
                 var scrubTimeMs by remember { mutableFloatStateOf(0f) }
                 var isPlaying by remember { mutableStateOf(false) }
-                var playbackSpeed by remember { mutableStateOf(2) } // 1x, 2x, 5x
+                var playbackSpeed by remember { mutableIntStateOf(settings.replaySpeed.value) }
                 var followMarker by remember { mutableStateOf(false) }
 
                 // Map & Marker references
                 var maplibreMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
                 var currentMarkerRef by remember { mutableStateOf<Marker?>(null) }
                 var routePolylineRef by remember { mutableStateOf<Polyline?>(null) }
+
+                fun applyReplayLayer(map: MapLibreMap, layer: MapLayerType) {
+                    val styleBuilder = if (layer.isRaster) {
+                        Style.Builder().fromJson(layer.buildStyleJson())
+                    } else {
+                        Style.Builder().fromUri(layer.tileOrStyleUrl)
+                    }
+                    map.setStyle(styleBuilder) { _ ->
+                        val points = gpsSamples.map { LatLng(it.latitude!!, it.longitude!!) }
+                        if (points.isNotEmpty()) {
+                            routePolylineRef = map.addPolyline(
+                                PolylineOptions()
+                                    .addAll(points)
+                                    .color(AndroidColor.parseColor("#CCFF00"))
+                                    .width(4.5f)
+                            )
+
+                            val boundsBuilder = LatLngBounds.Builder()
+                            points.forEach { boundsBuilder.include(it) }
+                            try {
+                                val bounds = boundsBuilder.build()
+                                map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, 60), 500)
+                            } catch (_: Exception) {
+                                map.cameraPosition = CameraPosition.Builder()
+                                    .target(points.first())
+                                    .zoom(14.0)
+                                    .build()
+                            }
+
+                            val firstPt = points.first()
+                            currentMarkerRef = map.addMarker(
+                                MarkerOptions().position(firstPt).title("Start")
+                            )
+                        }
+                    }
+                }
 
                 // Continuous playback loop
                 LaunchedEffect(isPlaying, playbackSpeed, totalDurationMs) {
@@ -215,9 +292,7 @@ fun RouteReplayCard(
 
                     if (currentMarkerRef == null) {
                         currentMarkerRef = map.addMarker(
-                            MarkerOptions()
-                                .position(latLng)
-                                .title("Current Position")
+                            MarkerOptions().position(latLng).title("Current Position")
                         )
                     } else {
                         currentMarkerRef?.position = latLng
@@ -235,7 +310,6 @@ fun RouteReplayCard(
                         .height(260.dp)
                         .clip(RoundedCornerShape(12.dp))
                 ) {
-                    // MapLibre View
                     val mapView = remember {
                         MapView(context).apply {
                             onCreate(null)
@@ -265,41 +339,7 @@ fun RouteReplayCard(
                             mapView.apply {
                                 getMapAsync { map ->
                                     maplibreMapRef = map
-                                    val openFreeMapStyle = "https://tiles.openfreemap.org/styles/liberty"
-                                    map.setStyle(Style.Builder().fromUri(openFreeMapStyle)) { _ ->
-                                        // Plot Route Polyline
-                                        val points = gpsSamples.map { LatLng(it.latitude!!, it.longitude!!) }
-                                        if (points.isNotEmpty()) {
-                                            routePolylineRef = map.addPolyline(
-                                                PolylineOptions()
-                                                    .addAll(points)
-                                                    .color(AndroidColor.parseColor("#CCFF00")) // ElectricYellow
-                                                    .width(4.5f)
-                                            )
-
-                                            // Center bounds
-                                            val boundsBuilder = LatLngBounds.Builder()
-                                            points.forEach { boundsBuilder.include(it) }
-                                            try {
-                                                val bounds = boundsBuilder.build()
-                                                map.easeCamera(
-                                                    CameraUpdateFactory.newLatLngBounds(bounds, 60),
-                                                    600
-                                                )
-                                            } catch (e: Exception) {
-                                                map.cameraPosition = CameraPosition.Builder()
-                                                    .target(points.first())
-                                                    .zoom(14.0)
-                                                    .build()
-                                            }
-
-                                            // Add initial marker
-                                            val firstPt = points.first()
-                                            currentMarkerRef = map.addMarker(
-                                                MarkerOptions().position(firstPt).title("Start")
-                                            )
-                                        }
-                                    }
+                                    applyReplayLayer(map, activeLayer)
                                 }
                             }
                         },
@@ -373,6 +413,51 @@ fun RouteReplayCard(
                             .padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        // Layer Selector Button
+                        Box {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xCC222222),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                IconButton(onClick = { showLayerMenu = true }) {
+                                    Icon(
+                                        Icons.Default.Layers,
+                                        contentDescription = "Change Layer",
+                                        tint = ElectricMint,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = showLayerMenu,
+                                onDismissRequest = { showLayerMenu = false },
+                                modifier = Modifier.background(Color(0xFF1E1E1E))
+                            ) {
+                                MapLayerType.entries.forEach { layer ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = layer.displayName,
+                                                fontWeight = if (layer == activeLayer) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (layer == activeLayer) ElectricYellow else Color.White,
+                                                fontSize = 12.sp
+                                            )
+                                        },
+                                        onClick = {
+                                            activeLayer = layer
+                                            settings.setMapLayer(layer)
+                                            showLayerMenu = false
+                                            maplibreMapRef?.let { map ->
+                                                applyReplayLayer(map, layer)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
                         // Recenter Route Bounds
                         Surface(
                             shape = CircleShape,
@@ -466,15 +551,16 @@ fun RouteReplayCard(
 
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            // Speed Selector Button
+                            // Speed Selector Button (1x, 2x, 4x, 8x)
                             TextButton(
                                 onClick = {
                                     playbackSpeed = when (playbackSpeed) {
                                         1 -> 2
-                                        2 -> 5
-                                        5 -> 10
+                                        2 -> 4
+                                        4 -> 8
                                         else -> 1
                                     }
+                                    settings.setReplaySpeed(playbackSpeed)
                                 },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.textButtonColors(

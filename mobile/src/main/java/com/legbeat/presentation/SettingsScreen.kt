@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -38,10 +39,17 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.text.font.FontFamily
+import com.legbeat.service.FlyoverSettingsRepository
+import com.legbeat.service.MapLayerType
+import kotlin.math.roundToInt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -89,6 +97,7 @@ import com.legbeat.wear.WearableMessageSender
 fun SettingsScreen(
     healthConnectManager: HealthConnectManager,
     voiceSettings: VoiceSettingsRepository,
+    flyoverSettings: FlyoverSettingsRepository,
     audioAnnouncer: CadenceAudioAnnouncer,
     wearMessageSender: WearableMessageSender,
     onBack: () -> Unit
@@ -691,6 +700,177 @@ fun SettingsScreen(
                         Text("0% (Strict)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                         Text("50% (Default)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                         Text("100% (High)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
+                }
+            }
+
+            // 3D Flyover & Map Replay Settings Card
+            val flyoverTilt by flyoverSettings.cameraTiltAngle.collectAsState()
+            val flyoverSpeed by flyoverSettings.replaySpeed.collectAsState()
+            val flyoverLayer by flyoverSettings.mapLayer.collectAsState()
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Layers, contentDescription = null, tint = ElectricMint)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "3D Video & Map Replay",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // 1. Map Layer Style
+                    Text(
+                        text = "Map Layer Style",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ElectricYellow
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    for (layer in MapLayerType.entries) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { flyoverSettings.setMapLayer(layer) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = (flyoverLayer == layer),
+                                onClick = { flyoverSettings.setMapLayer(layer) },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = ElectricYellow,
+                                    unselectedColor = Color.Gray
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = layer.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (flyoverLayer == layer) FontWeight.Bold else FontWeight.Normal,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = layer.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.LightGray
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "ℹ️ Note: Street, Satellite, and Topographic Terrain layers are 100% free with zero API keys. Live vehicle traffic view is not included as it requires proprietary commercial telematics subscriptions (Google/TomTom), violating our zero-cost local-first architecture.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        lineHeight = 15.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 2. Camera Tilt Angle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Camera Tilt Angle (Pitch)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ElectricYellow
+                        )
+                        Text(
+                            text = "${flyoverTilt.roundToInt()}°",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            color = ElectricMint
+                        )
+                    }
+                    Text(
+                        text = "Controls the drone pitch angle during 3D flyovers (30° top-down to 85° horizon).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Slider(
+                        value = flyoverTilt,
+                        onValueChange = { flyoverSettings.setCameraTiltAngle(it) },
+                        valueRange = 30f..85f,
+                        steps = 11,
+                        colors = SliderDefaults.colors(
+                            thumbColor = ElectricYellow,
+                            activeTrackColor = ElectricYellow,
+                            inactiveTrackColor = Color.DarkGray
+                        )
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        for (preset in listOf(45f, 60f, 65f, 75f)) {
+                            TextButton(
+                                onClick = { flyoverSettings.setCameraTiltAngle(preset) },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    containerColor = if (flyoverTilt.roundToInt() == preset.toInt()) ElectricYellow else Color(0xFF2A2A2A),
+                                    contentColor = if (flyoverTilt.roundToInt() == preset.toInt()) Color.Black else Color.White
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("${preset.toInt()}°", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 3. Replay Speed
+                    Text(
+                        text = "Default Workout Replay Speed",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ElectricYellow
+                    )
+                    Text(
+                        text = "Speed multiplier for route animation and video recording.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        for (spd in listOf(1, 2, 4, 8)) {
+                            TextButton(
+                                onClick = { flyoverSettings.setReplaySpeed(spd) },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    containerColor = if (flyoverSpeed == spd) ElectricMint else Color(0xFF2A2A2A),
+                                    contentColor = if (flyoverSpeed == spd) Color.Black else Color.White
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("${spd}x", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }

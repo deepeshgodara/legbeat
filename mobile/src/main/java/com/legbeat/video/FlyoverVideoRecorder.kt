@@ -199,5 +199,27 @@ class FlyoverVideoRecorder(private val context: Context) {
 
     companion object {
         private const val TAG = "FlyoverVideoRecorder"
+
+        fun findLatestVideoForRide(context: Context, rideId: String): File? {
+            val dir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir
+            val files = dir.listFiles { _, name ->
+                name.startsWith("legbeat_flyover_${rideId}_") && name.endsWith(".mp4")
+            } ?: return null
+            return files.maxByOrNull { it.lastModified() }
+        }
+
+        fun createShareIntent(context: Context, file: File): Intent {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            return Intent(Intent.ACTION_SEND).apply {
+                type = "video/mp4"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "LegBeat 3D Flyover Replay")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
     }
 }

@@ -25,7 +25,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sync
+import com.legbeat.service.FlyoverSettingsRepository
+import com.legbeat.video.FlyoverVideoRecorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -92,6 +95,7 @@ fun PostRideSummaryScreen(
     fitEncoder: FitActivityEncoder,
     zoneCalculator: ZoneCalculator,
     coachingEngine: OfflineCoachingEngine,
+    flyoverSettings: FlyoverSettingsRepository? = null,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -204,10 +208,13 @@ fun PostRideSummaryScreen(
         )
     }
 
+    val effectiveFlyoverSettings = flyoverSettings ?: remember { FlyoverSettingsRepository(context) }
+
     if (showFlyoverDialog && ride != null) {
         Flyover3DDialog(
             ride = ride!!,
             samples = samples,
+            flyoverSettings = effectiveFlyoverSettings,
             onDismiss = { showFlyoverDialog = false }
         )
     }
@@ -309,6 +316,7 @@ fun PostRideSummaryScreen(
             RouteReplayCard(
                 ride = currentRide,
                 samples = samples,
+                flyoverSettings = effectiveFlyoverSettings,
                 onLaunch3DFlyover = {
                     showFlyoverDialog = true
                 }
@@ -561,6 +569,30 @@ fun PostRideSummaryScreen(
                         text = if (fitExportPath != null) "FIT File Ready (Strava/TrainingPeaks)" else "Export Garmin .FIT File",
                         color = Color.White
                     )
+                }
+
+                // "Share 3D Flyover Video" Button (if video exists)
+                val latestFlyoverVideo = remember(currentRide.id, showFlyoverDialog) {
+                    FlyoverVideoRecorder.findLatestVideoForRide(context, currentRide.id)
+                }
+                if (latestFlyoverVideo != null && latestFlyoverVideo.exists()) {
+                    Button(
+                        onClick = {
+                            val shareIntent = FlyoverVideoRecorder.createShareIntent(context, latestFlyoverVideo)
+                            context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricMint, contentColor = Color.Black),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Share 3D Flyover Video",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
                 }
 
                 // "Generate 3D Flyover Video" Button

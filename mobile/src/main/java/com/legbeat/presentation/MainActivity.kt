@@ -36,6 +36,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 import com.legbeat.service.CadenceAudioAnnouncer
+import com.legbeat.service.FlyoverSettingsRepository
 import com.legbeat.service.VoiceSettingsRepository
 import com.legbeat.wear.WearableMessageSender
 
@@ -73,6 +74,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var wearMessageSender: WearableMessageSender
 
+    @Inject
+    lateinit var flyoverSettings: FlyoverSettingsRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -84,6 +88,7 @@ class MainActivity : ComponentActivity() {
                     zoneCalculator = zoneCalculator,
                     coachingEngine = coachingEngine,
                     voiceSettings = voiceSettings,
+                    flyoverSettings = flyoverSettings,
                     audioAnnouncer = audioAnnouncer,
                     wearMessageSender = wearMessageSender
                 )
@@ -100,6 +105,7 @@ fun MainNavigation(
     zoneCalculator: ZoneCalculator,
     coachingEngine: OfflineCoachingEngine,
     voiceSettings: VoiceSettingsRepository,
+    flyoverSettings: FlyoverSettingsRepository,
     audioAnnouncer: CadenceAudioAnnouncer,
     wearMessageSender: WearableMessageSender
 ) {
@@ -203,6 +209,7 @@ fun MainNavigation(
                 fitEncoder = fitEncoder,
                 zoneCalculator = zoneCalculator,
                 coachingEngine = coachingEngine,
+                flyoverSettings = flyoverSettings,
                 onBack = { currentScreen = Screen.Dashboard }
             )
         }
@@ -210,6 +217,7 @@ fun MainNavigation(
             SettingsScreen(
                 healthConnectManager = healthConnectManager,
                 voiceSettings = voiceSettings,
+                flyoverSettings = flyoverSettings,
                 audioAnnouncer = audioAnnouncer,
                 wearMessageSender = wearMessageSender,
                 onBack = { currentScreen = Screen.Dashboard }

@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,25 +27,36 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -73,6 +85,8 @@ import com.legbeat.core.model.CadenceZone
 import com.legbeat.core.model.Ride
 import com.legbeat.presentation.theme.ElectricMint
 import com.legbeat.presentation.theme.ElectricYellow
+import com.legbeat.service.FlyoverSettingsRepository
+import com.legbeat.service.MapLayerType
 import com.legbeat.video.FlyoverVideoRecorder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -88,20 +102,25 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import java.io.File
 import java.util.Locale
-
-private const val OPEN_FREE_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+import kotlin.math.roundToInt
 
 @Composable
 fun Flyover3DDialog(
     ride: Ride,
     samples: List<CadenceSample>,
+    flyoverSettings: FlyoverSettingsRepository,
     onDismiss: () -> Unit
 ) {
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Flyover3DScreen(ride = ride, samples = samples, onDismiss = onDismiss)
+        Flyover3DScreen(
+            ride = ride,
+            samples = samples,
+            flyoverSettings = flyoverSettings,
+            onDismiss = onDismiss
+        )
     }
 }
 
@@ -109,6 +128,7 @@ fun Flyover3DDialog(
 fun Flyover3DScreen(
     ride: Ride,
     samples: List<CadenceSample>,
+    flyoverSettings: FlyoverSettingsRepository,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -136,11 +156,26 @@ fun Flyover3DScreen(
         return
     }
 
-    // Video Recorder instance
+    // Video Recorder & State
     val videoRecorder = remember { FlyoverVideoRecorder(context) }
     var isRecordingVideo by remember { mutableStateOf(false) }
     var recordedFile by remember { mutableStateOf<File?>(null) }
+    var existingVideoFile by remember(ride.id) {
+        mutableStateOf(FlyoverVideoRecorder.findLatestVideoForRide(context, ride.id))
+    }
     var showSavedDialog by remember { mutableStateOf(false) }
+
+    // Settings State
+    val savedTilt by flyoverSettings.cameraTiltAngle.collectAsState()
+    val savedSpeed by flyoverSettings.replaySpeed.collectAsState()
+    val savedLayer by flyoverSettings.mapLayer.collectAsState()
+
+    var currentTiltAngle by remember { mutableFloatStateOf(savedTilt) }
+    var playbackSpeed by remember { mutableIntStateOf(savedSpeed) }
+    var currentLayer by remember { mutableStateOf(savedLayer) }
+
+    var showLayerMenu by remember { mutableStateOf(false) }
+    var showTiltDialog by remember { mutableStateOf(false) }
 
     // Screen Capture Permission Launcher
     val screenCaptureLauncher = rememberLauncherForActivityResult(
@@ -168,7 +203,6 @@ fun Flyover3DScreen(
 
     // Playback state
     var isPlaying by remember { mutableStateOf(true) }
-    var playbackSpeed by remember { mutableIntStateOf(2) }
     var progressFraction by remember { mutableFloatStateOf(0f) }
     var currentBearing by remember { mutableStateOf(0.0) }
 
@@ -179,8 +213,37 @@ fun Flyover3DScreen(
 
     val totalDurationMs = ride.durationMs.coerceAtLeast(1000L)
 
+    // Helper to apply layer style to MapLibre
+    fun applyMapStyle(map: MapLibreMap, layer: MapLayerType) {
+        val styleBuilder = if (layer.isRaster) {
+            Style.Builder().fromJson(layer.buildStyleJson())
+        } else {
+            Style.Builder().fromUri(layer.tileOrStyleUrl)
+        }
+        map.setStyle(styleBuilder) { _ ->
+            val points = gpsSamples.map { LatLng(it.latitude!!, it.longitude!!) }
+            if (points.isNotEmpty()) {
+                map.addPolyline(
+                    PolylineOptions()
+                        .addAll(points)
+                        .color(AndroidColor.parseColor("#CCFF00"))
+                        .width(5.5f)
+                )
+
+                val targetTimestamp = ride.startTimeMs + (progressFraction * totalDurationMs).toLong()
+                val sample = interpolateSampleAt(targetTimestamp, gpsSamples)
+                val lat = sample?.latitude ?: points.first().latitude
+                val lon = sample?.longitude ?: points.first().longitude
+
+                currentMarkerRef = map.addMarker(
+                    MarkerOptions().position(LatLng(lat, lon)).title("Rider")
+                )
+            }
+        }
+    }
+
     // Animation & Flyover Camera Loop
-    LaunchedEffect(isPlaying, playbackSpeed, isRecordingVideo) {
+    LaunchedEffect(isPlaying, playbackSpeed, isRecordingVideo, currentTiltAngle) {
         val totalSteps = (totalDurationMs / 50L).coerceAtLeast(20L)
         while (isActive && isPlaying) {
             delay(50L)
@@ -196,6 +259,7 @@ fun Flyover3DScreen(
                     val file = videoRecorder.stopRecording()
                     isRecordingVideo = false
                     recordedFile = file
+                    existingVideoFile = file
                     if (file != null && file.exists()) {
                         showSavedDialog = true
                     }
@@ -235,11 +299,11 @@ fun Flyover3DScreen(
                     currentBearing = interpolateAngle(currentBearing, targetBearing, 0.25)
                 }
 
-                // 65-Degree Tilt Camera Animate
+                // Tilt Camera Animation using custom tilt angle setting
                 val camera = CameraPosition.Builder()
                     .target(currentLatLng)
                     .zoom(16.0)
-                    .tilt(65.0)
+                    .tilt(currentTiltAngle.toDouble())
                     .bearing(currentBearing)
                     .build()
 
@@ -286,32 +350,21 @@ fun Flyover3DScreen(
                 mapView.apply {
                     getMapAsync { map ->
                         maplibreMapRef = map
-                        map.setStyle(Style.Builder().fromUri(OPEN_FREE_MAP_STYLE_URL)) { _ ->
-                            val points = gpsSamples.map { LatLng(it.latitude!!, it.longitude!!) }
-                            if (points.isNotEmpty()) {
-                                // Draw glowing yellow route polyline
-                                map.addPolyline(
-                                    PolylineOptions()
-                                        .addAll(points)
-                                        .color(AndroidColor.parseColor("#CCFF00"))
-                                        .width(5.5f)
-                                )
+                        applyMapStyle(map, currentLayer)
 
-                                // Initial Camera Setup with 65° tilt
-                                val first = points.first()
-                                val second = if (points.size > 1) points[1] else first
-                                val initBearing = calculateBearing(first, second)
-                                currentBearing = initBearing
+                        val points = gpsSamples.map { LatLng(it.latitude!!, it.longitude!!) }
+                        if (points.isNotEmpty()) {
+                            val first = points.first()
+                            val second = if (points.size > 1) points[1] else first
+                            val initBearing = calculateBearing(first, second)
+                            currentBearing = initBearing
 
-                                map.cameraPosition = CameraPosition.Builder()
-                                    .target(first)
-                                    .zoom(16.0)
-                                    .tilt(65.0)
-                                    .bearing(initBearing)
-                                    .build()
-
-                                currentMarkerRef = map.addMarker(MarkerOptions().position(first).title("Rider"))
-                            }
+                            map.cameraPosition = CameraPosition.Builder()
+                                .target(first)
+                                .zoom(16.0)
+                                .tilt(currentTiltAngle.toDouble())
+                                .bearing(initBearing)
+                                .build()
                         }
                     }
                 }
@@ -319,19 +372,20 @@ fun Flyover3DScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Top Header: Branding & Close Button
+        // Top Header: Branding, Layer Selector, Tilt, Share, Close
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 40.dp, start = 16.dp, end = 16.dp)
+                .padding(top = 40.dp, start = 12.dp, end = 12.dp)
                 .align(Alignment.TopCenter),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Close / Back button
             Surface(
                 shape = CircleShape,
                 color = Color(0xAA000000),
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(38.dp)
             ) {
                 IconButton(onClick = {
                     if (videoRecorder.isRecording) {
@@ -347,60 +401,154 @@ fun Flyover3DScreen(
                 }
             }
 
-            // Watermark / Header
+            // Watermark / Header Branding
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xAA111111)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "LEG",
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
-                        fontSize = 13.sp
+                        fontSize = 12.sp
                     )
                     Text(
                         text = "BEAT",
                         fontWeight = FontWeight.Black,
                         color = ElectricYellow,
-                        fontSize = 13.sp
+                        fontSize = 12.sp
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "3D CINEMATIC",
+                        text = "3D FLYOVER",
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 1.sp,
                         color = ElectricMint,
-                        fontSize = 11.sp
+                        fontSize = 10.sp
                     )
                 }
             }
 
-            // Recording Status Indicator or Record Trigger Button
-            if (isRecordingVideo) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xDDE53935)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+            // Action Buttons: Layer Switcher, Tilt Setting, Share, REC
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Layer Selector Button & Dropdown Menu
+                Box {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xCC222222),
+                        modifier = Modifier.size(38.dp)
                     ) {
-                        Icon(
-                            Icons.Default.FiberManualRecord,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("REC", fontWeight = FontWeight.Black, color = Color.White, fontSize = 12.sp)
+                        IconButton(onClick = { showLayerMenu = true }) {
+                            Icon(
+                                Icons.Default.Layers,
+                                contentDescription = "Map Layers",
+                                tint = ElectricMint,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = showLayerMenu,
+                        onDismissRequest = { showLayerMenu = false },
+                        modifier = Modifier.background(Color(0xFF1E1E1E))
+                    ) {
+                        MapLayerType.entries.forEach { layer ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = layer.displayName,
+                                            fontWeight = if (layer == currentLayer) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (layer == currentLayer) ElectricYellow else Color.White,
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            text = layer.description,
+                                            color = Color.Gray,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    currentLayer = layer
+                                    flyoverSettings.setMapLayer(layer)
+                                    showLayerMenu = false
+                                    maplibreMapRef?.let { map ->
+                                        applyMapStyle(map, layer)
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
-            } else {
-                Spacer(modifier = Modifier.size(40.dp))
+
+                // Tilt Angle Settings Button
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xCC222222),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    IconButton(onClick = { showTiltDialog = true }) {
+                        Icon(
+                            Icons.Default.ScreenRotation,
+                            contentDescription = "Camera Tilt",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                // Video Share Button (available if a video is recorded or exists)
+                val videoToShare = recordedFile ?: existingVideoFile
+                if (videoToShare != null && videoToShare.exists()) {
+                    Surface(
+                        shape = CircleShape,
+                        color = ElectricYellow,
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        IconButton(onClick = {
+                            val shareIntent = FlyoverVideoRecorder.createShareIntent(context, videoToShare)
+                            context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
+                        }) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = "Share Video",
+                                tint = Color.Black,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Recording Status Indicator
+                if (isRecordingVideo) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xDDE53935)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.FiberManualRecord,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("REC", fontWeight = FontWeight.Black, color = Color.White, fontSize = 11.sp)
+                        }
+                    }
+                }
             }
         }
 
@@ -461,6 +609,14 @@ fun Flyover3DScreen(
                             }
                         }
                     }
+
+                    // Current Layer badge
+                    Text(
+                        text = currentLayer.displayName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.DarkGray,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
         }
@@ -528,14 +684,17 @@ fun Flyover3DScreen(
 
                         Spacer(modifier = Modifier.width(8.dp))
 
-                        // Speed Toggle
+                        // Speed Toggle (1x, 2x, 4x, 8x)
                         TextButton(
                             onClick = {
-                                playbackSpeed = when (playbackSpeed) {
+                                val nextSpeed = when (playbackSpeed) {
                                     1 -> 2
                                     2 -> 4
+                                    4 -> 8
                                     else -> 1
                                 }
+                                playbackSpeed = nextSpeed
+                                flyoverSettings.setReplaySpeed(nextSpeed)
                             },
                             colors = ButtonDefaults.textButtonColors(
                                 containerColor = Color(0xFF262626),
@@ -554,6 +713,7 @@ fun Flyover3DScreen(
                                 val file = videoRecorder.stopRecording()
                                 isRecordingVideo = false
                                 recordedFile = file
+                                existingVideoFile = file
                                 if (file != null && file.exists()) {
                                     showSavedDialog = true
                                 }
@@ -568,7 +728,6 @@ fun Flyover3DScreen(
                     } else {
                         Button(
                             onClick = {
-                                // Request MediaProjection capture
                                 val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                                 screenCaptureLauncher.launch(manager.createScreenCaptureIntent())
                                 progressFraction = 0f
@@ -595,7 +754,97 @@ fun Flyover3DScreen(
         }
     }
 
-    // Video Saved Success Dialog
+    // Camera Tilt Angle Adjustment Dialog
+    if (showTiltDialog) {
+        AlertDialog(
+            onDismissRequest = { showTiltDialog = false },
+            title = {
+                Text(
+                    "Camera Tilt Angle",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        "Set camera pitch angle for the 3D cinematic drone flyover:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "${currentTiltAngle.roundToInt()}° Pitch",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black,
+                        color = ElectricYellow,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Slider(
+                        value = currentTiltAngle,
+                        onValueChange = {
+                            currentTiltAngle = it
+                            flyoverSettings.setCameraTiltAngle(it)
+                        },
+                        valueRange = 30f..85f,
+                        steps = 11,
+                        colors = SliderDefaults.colors(
+                            thumbColor = ElectricYellow,
+                            activeTrackColor = ElectricYellow,
+                            inactiveTrackColor = Color.DarkGray
+                        )
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("30° (Top-down)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text("65° (Cinematic)", style = MaterialTheme.typography.labelSmall, color = ElectricMint)
+                        Text("85° (Horizon)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Preset chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(45f, 60f, 65f, 75f).forEach { preset ->
+                            TextButton(
+                                onClick = {
+                                    currentTiltAngle = preset
+                                    flyoverSettings.setCameraTiltAngle(preset)
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    containerColor = if (currentTiltAngle.roundToInt() == preset.toInt()) ElectricYellow else Color(0xFF2A2A2A),
+                                    contentColor = if (currentTiltAngle.roundToInt() == preset.toInt()) Color.Black else Color.White
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("${preset.toInt()}°", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showTiltDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricYellow, contentColor = Color.Black)
+                ) {
+                    Text("Apply", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Video Saved Success Dialog with Prominent Share Video Button
     if (showSavedDialog && recordedFile != null) {
         val file = recordedFile!!
         AlertDialog(
@@ -603,7 +852,7 @@ fun Flyover3DScreen(
             title = { Text("3D Flyover Video Saved!", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text("Your cinematic 3D flyover video has been successfully rendered and saved to Movies/LegBeat on your device.")
+                    Text("Your cinematic 3D flyover video has been recorded and saved to Movies/LegBeat.")
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         file.name,
@@ -611,12 +860,18 @@ fun Flyover3DScreen(
                         fontSize = 12.sp,
                         color = Color.LightGray
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "Click 'Share Video' to send to WhatsApp, Strava, Instagram, or any other app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ElectricMint
+                    )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val shareIntent = videoRecorder.createShareIntent(file)
+                        val shareIntent = FlyoverVideoRecorder.createShareIntent(context, file)
                         context.startActivity(Intent.createChooser(shareIntent, "Share 3D Flyover Video"))
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ElectricYellow, contentColor = Color.Black)
