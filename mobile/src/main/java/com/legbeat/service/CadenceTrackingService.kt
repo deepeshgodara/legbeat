@@ -1,5 +1,6 @@
 package com.legbeat.service
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,16 +8,25 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.legbeat.analytics.repository.RideRepository
 import com.legbeat.core.dsp.CadenceEstimate
 import com.legbeat.core.dsp.SignalProcessingPipeline
@@ -61,6 +71,9 @@ class CadenceTrackingService : Service(), SensorEventListener {
     private var linearAccelSensor: Sensor? = null
     private var proximitySensor: Sensor? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var locationCallback: LocationCallback? = null
+    @Volatile private var latestLocation: Location? = null
 
     private val pipeline = SignalProcessingPipeline()
     private var rideStartTimeMs = 0L
@@ -76,6 +89,7 @@ class CadenceTrackingService : Service(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         linearAccelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
         proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
@@ -129,6 +143,38 @@ class CadenceTrackingService : Service(), SensorEventListener {
             wearMessageSender.openAppOnWatch()
         }
 
+        // Initialize 1-second high-accuracy background location tracking
+        latestLocation = null
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+            .setMinUpdateIntervalMillis(1000L)
+            .setMinUpdateDistanceMeters(0f)
+            .build()
+
+        val callback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.lastLocation?.let { loc ->
+                    latestLocation = loc
+                }
+            }
+        }
+        locationCallback = callback
+
+        try {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                fusedLocationClient.requestLocationUpdates(
+                    locationRequest,
+                    callback,
+                    android.os.Looper.getMainLooper()
+                )
+            }
+        } catch (e: SecurityException) {
+            Log.e("CadenceTrackingService", "Location permission not granted", e)
+        }
+
         // Register sensor listeners
         linearAccelSensor?.let { sensor ->
             sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
@@ -162,8 +208,19 @@ class CadenceTrackingService : Service(), SensorEventListener {
                     _currentCadence.value = rpm
                     _currentZone.value = zone
 
-                    if (rpm > 0) {
-                        recordedSamples.add(CadenceSample(now, rpm))
+                    val loc = latestLocation
+                    val sample = CadenceSample(
+                        timestampMs = now,
+                        rpm = rpm,
+                        latitude = loc?.latitude,
+                        longitude = loc?.longitude,
+                        altitude = if (loc?.hasAltitude() == true) loc.altitude else null,
+                        speed = if (loc?.hasSpeed() == true) loc.speed else null
+                    )
+
+                    // Record sample if pedaling (>0 RPM) OR moving (>0.5 m/s) to maintain unbroken route during coasting
+                    if (rpm > 0 || (loc != null && (loc.speed ?: 0f) > 0.5f)) {
+                        recordedSamples.add(sample)
                     }
                     intervalRpmSamples.add(rpm)
 
@@ -202,6 +259,12 @@ class CadenceTrackingService : Service(), SensorEventListener {
         _currentCadence.value = 0
         _currentZone.value = CadenceZone.IDLE
         _currentRideId.value = null
+
+        locationCallback?.let { callback ->
+            fusedLocationClient.removeLocationUpdates(callback)
+        }
+        locationCallback = null
+        latestLocation = null
 
         sensorManager.unregisterListener(this)
         processingJob?.cancel()
@@ -282,10 +345,15 @@ class CadenceTrackingService : Service(), SensorEventListener {
     private fun startForegroundServiceNotification(rpmText: String, subtitle: String) {
         val notification = buildNotification(rpmText, subtitle)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            }
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+                serviceType
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -327,6 +395,11 @@ class CadenceTrackingService : Service(), SensorEventListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        locationCallback?.let { callback ->
+            fusedLocationClient.removeLocationUpdates(callback)
+        }
+        locationCallback = null
+        latestLocation = null
         sensorManager.unregisterListener(this)
         processingJob?.cancel()
         serviceScope.cancel()

@@ -1,8 +1,13 @@
 package com.legbeat.presentation
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,10 +28,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
@@ -83,6 +88,20 @@ fun DashboardScreen(
     val rides by rideRepository.getAllRides().collectAsState(initial = emptyList())
     val isTracking by CadenceTrackingService.isTracking.collectAsState()
     var rideToDelete by remember { mutableStateOf<Ride?>(null) }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        val startIntent = Intent(context, CadenceTrackingService::class.java).apply {
+            action = CadenceTrackingService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(startIntent)
+        } else {
+            context.startService(startIntent)
+        }
+        onStartRide()
+    }
 
     rideToDelete?.let { targetRide ->
         AlertDialog(
@@ -154,16 +173,31 @@ fun DashboardScreen(
             Button(
                 onClick = {
                     if (!isTracking) {
-                        val startIntent = Intent(context, CadenceTrackingService::class.java).apply {
-                            action = CadenceTrackingService.ACTION_START
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(startIntent)
+                        val hasFine = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasFine) {
+                            val startIntent = Intent(context, CadenceTrackingService::class.java).apply {
+                                action = CadenceTrackingService.ACTION_START
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                context.startForegroundService(startIntent)
+                            } else {
+                                context.startService(startIntent)
+                            }
+                            onStartRide()
                         } else {
-                            context.startService(startIntent)
+                            locationPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
                         }
+                    } else {
+                        onStartRide()
                     }
-                    onStartRide()
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = ElectricYellow,
@@ -231,7 +265,7 @@ fun DashboardScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            Icons.Default.DirectionsBike,
+                            Icons.AutoMirrored.Filled.DirectionsBike,
                             contentDescription = null,
                             tint = Color.DarkGray,
                             modifier = Modifier.size(64.dp)
