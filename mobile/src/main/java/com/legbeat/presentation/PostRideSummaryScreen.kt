@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -104,6 +105,7 @@ fun PostRideSummaryScreen(
     var fitExportPath by remember { mutableStateOf<String?>(null) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showShortRideDialog by remember { mutableStateOf(false) }
+    var showFlyoverDialog by remember { mutableStateOf(false) }
     var hasCheckedShortRide by remember(rideId) { mutableStateOf(false) }
 
     LaunchedEffect(rideId) {
@@ -294,6 +296,15 @@ fun PostRideSummaryScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
+
+            // Interactive Route Replay with Scrubbing HUD
+            RouteReplayCard(
+                ride = currentRide,
+                samples = samples,
+                onLaunch3DFlyover = {
+                    showFlyoverDialog = true
+                }
+            )
 
             // Vico Time-Series Chart
             Card(
@@ -542,6 +553,25 @@ fun PostRideSummaryScreen(
                         text = if (fitExportPath != null) "FIT File Ready (Strava/TrainingPeaks)" else "Export Garmin .FIT File",
                         color = Color.White
                     )
+                }
+
+                // "Generate 3D Flyover Video" Button
+                val hasGpsRoute = samples.any { it.latitude != null && it.longitude != null }
+                if (hasGpsRoute) {
+                    OutlinedButton(
+                        onClick = { showFlyoverDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ElectricYellow)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = ElectricYellow)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Generate 3D Flyover Video",
+                            fontWeight = FontWeight.Bold,
+                            color = ElectricYellow
+                        )
+                    }
                 }
 
                 // "Delete Workout" Button

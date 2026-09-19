@@ -82,7 +82,7 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.play.services.maps)
     implementation(libs.google.maps.compose)
-    // implementation(libs.maplibre.compose)
+    implementation(libs.maplibre.android)
 
     // Testing
     testImplementation(libs.junit)
