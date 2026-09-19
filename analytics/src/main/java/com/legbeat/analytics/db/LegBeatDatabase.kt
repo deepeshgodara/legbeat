@@ -18,7 +18,7 @@ import com.legbeat.analytics.db.entity.RideEntity
         HeartRateSampleEntity::class,
         PowerSampleEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class LegBeatDatabase : RoomDatabase() {

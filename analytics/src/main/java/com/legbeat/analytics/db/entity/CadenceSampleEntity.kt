@@ -25,10 +25,31 @@ data class CadenceSampleEntity(
     val id: Long = 0,
     val rideId: String,
     val timestampMs: Long,
-    val rpm: Int
+    val rpm: Int,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val altitude: Double? = null,
+    val speed: Float? = null
 ) {
     fun toDomain(): CadenceSample = CadenceSample(
         timestampMs = timestampMs,
-        rpm = rpm
+        rpm = rpm,
+        latitude = latitude,
+        longitude = longitude,
+        altitude = altitude,
+        speed = speed
     )
+
+    companion object {
+        fun fromDomain(rideId: String, sample: CadenceSample): CadenceSampleEntity =
+            CadenceSampleEntity(
+                rideId = rideId,
+                timestampMs = sample.timestampMs,
+                rpm = sample.rpm,
+                latitude = sample.latitude,
+                longitude = sample.longitude,
+                altitude = sample.altitude,
+                speed = sample.speed
+            )
+    }
 }

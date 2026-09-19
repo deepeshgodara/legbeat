@@ -46,11 +46,7 @@ class RideRepositoryImpl(
         rideDao.insertRide(rideEntity)
 
         val sampleEntities = samples.map { sample ->
-            CadenceSampleEntity(
-                rideId = ride.id,
-                timestampMs = sample.timestampMs,
-                rpm = sample.rpm
-            )
+            CadenceSampleEntity.fromDomain(ride.id, sample)
         }
         sampleDao.insertSamples(sampleEntities)
     }
