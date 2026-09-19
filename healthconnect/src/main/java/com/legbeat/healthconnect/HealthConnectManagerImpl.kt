@@ -4,8 +4,10 @@ import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.CyclingPedalingCadenceRecord
+import androidx.health.connect.client.records.ExerciseRoute
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.metadata.Metadata
+import androidx.health.connect.client.units.Length
 import com.legbeat.core.model.CadenceSample
 import com.legbeat.core.model.Ride
 import java.time.Instant
@@ -35,7 +37,8 @@ class HealthConnectManagerImpl(
     override fun getRequiredPermissions(): Set<String> {
         return setOf(
             HealthPermission.getWritePermission(ExerciseSessionRecord::class),
-            HealthPermission.getWritePermission(CyclingPedalingCadenceRecord::class)
+            HealthPermission.getWritePermission(CyclingPedalingCadenceRecord::class),
+            HealthPermission.PERMISSION_WRITE_EXERCISE_ROUTE
         )
     }
 
@@ -56,7 +59,18 @@ class HealthConnectManagerImpl(
         val endInstant = Instant.ofEpochMilli(ride.endTimeMs)
         val zoneOffset: ZoneOffset = ZoneId.systemDefault().rules.getOffset(startInstant)
 
-        // 1. Overall Workout Session Record
+        val routeLocations = samples.filter { it.latitude != null && it.longitude != null }.map { sample ->
+            ExerciseRoute.Location(
+                time = Instant.ofEpochMilli(sample.timestampMs),
+                latitude = sample.latitude!!,
+                longitude = sample.longitude!!,
+                horizontalAccuracy = null,
+                verticalAccuracy = null,
+                altitude = sample.altitude?.let { Length.meters(it) }
+            )
+        }
+
+        // 1. Overall Workout Session Record with attached ExerciseRoute
         val sessionRecord = ExerciseSessionRecord(
             startTime = startInstant,
             startZoneOffset = zoneOffset,
@@ -65,6 +79,7 @@ class HealthConnectManagerImpl(
             exerciseType = ExerciseSessionRecord.EXERCISE_TYPE_BIKING,
             title = "LegBeat Cycling Ride",
             notes = "Recorded via pocket sensor FFT pipeline",
+            exerciseRoute = if (routeLocations.isNotEmpty()) ExerciseRoute(routeLocations) else null,
             metadata = Metadata(
                 clientRecordId = "legbeat_ride_${ride.id}"
             )

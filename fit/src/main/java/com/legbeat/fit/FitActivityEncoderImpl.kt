@@ -43,17 +43,27 @@ class FitActivityEncoderImpl : FitActivityEncoder {
         }
         encoder.write(fileId)
 
-        // 2. High-Frequency Record Messages (One per cadence sample)
+        val semicirclesFactor = 2147483648.0 / 180.0
+
+        // 2. High-Frequency Record Messages (One per cadence sample with GPS & metrics)
         samples.forEach { sample ->
             val record = RecordMesg().apply {
                 timestamp = DateTime(Date(sample.timestampMs))
                 cadence = sample.rpm.toShort()
+                sample.latitude?.let { positionLat = (it * semicirclesFactor).toInt() }
+                sample.longitude?.let { positionLong = (it * semicirclesFactor).toInt() }
+                sample.speed?.let { speed = it }
+                sample.altitude?.let { enhancedAltitude = it.toFloat() }
             }
             encoder.write(record)
         }
 
         // 3. Session Message (Aggregate workout summary)
         val durationSec = (ride.durationMs / 1000.0).toFloat()
+        val speeds = samples.mapNotNull { sample -> sample.speed }.filter { it > 0f }
+        val avgSpeedMs = if (speeds.isNotEmpty()) speeds.average().toFloat() else null
+        val maxSpeedMs = speeds.maxOrNull()
+
         val session = SessionMesg().apply {
             startTime = DateTime(Date(ride.startTimeMs))
             totalElapsedTime = durationSec
@@ -62,6 +72,8 @@ class FitActivityEncoderImpl : FitActivityEncoder {
             subSport = SubSport.ROAD
             avgCadence = ride.avgCadence.toShort()
             maxCadence = ride.maxCadence.toShort()
+            avgSpeedMs?.let { avgSpeed = it }
+            maxSpeedMs?.let { maxSpeed = it }
         }
         encoder.write(session)
 
