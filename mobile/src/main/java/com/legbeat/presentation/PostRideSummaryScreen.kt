@@ -204,6 +204,14 @@ fun PostRideSummaryScreen(
         )
     }
 
+    if (showFlyoverDialog && ride != null) {
+        Flyover3DDialog(
+            ride = ride!!,
+            samples = samples,
+            onDismiss = { showFlyoverDialog = false }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
