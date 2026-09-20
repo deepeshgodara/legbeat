@@ -80,6 +80,7 @@ class CadenceTrackingService : Service(), SensorEventListener {
     private var rideId = ""
     private val recordedSamples = mutableListOf<CadenceSample>()
     private var isPhoneInPocket = true
+    private var liveTotalRevs = 0.0
 
     override fun onCreate() {
         super.onCreate()
@@ -124,6 +125,7 @@ class CadenceTrackingService : Service(), SensorEventListener {
         pipeline.reset()
         pipeline.setSensitivity(voiceSettings.sensorSensitivityPercent.value)
         isPhoneInPocket = true
+        liveTotalRevs = 0.0
 
         // Dynamically update pipeline sensitivity if modified in Settings
         serviceScope.launch {
@@ -135,6 +137,9 @@ class CadenceTrackingService : Service(), SensorEventListener {
         _lastFinishedRideId.value = null
         _isTracking.value = true
         _currentRideId.value = rideId
+        _currentLocation.value = null
+        _liveGpsRoute.value = emptyList()
+        _totalPedalStrokes.value = 0
 
         startForegroundServiceNotification("0 RPM", "Starting ride tracking...")
 
@@ -154,6 +159,19 @@ class CadenceTrackingService : Service(), SensorEventListener {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { loc ->
                     latestLocation = loc
+                    _currentLocation.value = loc
+                    if (recordedSamples.isEmpty()) {
+                        val startSample = CadenceSample(
+                            timestampMs = System.currentTimeMillis(),
+                            rpm = _currentCadence.value,
+                            latitude = loc.latitude,
+                            longitude = loc.longitude,
+                            altitude = if (loc.hasAltitude()) loc.altitude else null,
+                            speed = if (loc.hasSpeed()) loc.speed else null
+                        )
+                        recordedSamples.add(startSample)
+                        _liveGpsRoute.value = listOf(startSample)
+                    }
                 }
             }
         }
@@ -200,6 +218,23 @@ class CadenceTrackingService : Service(), SensorEventListener {
                     _currentZone.value = CadenceZone.IDLE
                     wearMessageSender.sendCadence(0, CadenceZone.IDLE.code, now)
                     updateNotification("Paused (Out of Pocket)", "$elapsedMin min elapsed • Waiting for pocket detection")
+
+                    val loc = latestLocation
+                    if (loc != null) {
+                        val lastGpsSample = recordedSamples.lastOrNull { it.latitude != null && it.longitude != null }
+                        if (lastGpsSample == null || (now - lastGpsSample.timestampMs >= 2000L)) {
+                            val pausedSample = CadenceSample(
+                                timestampMs = now,
+                                rpm = 0,
+                                latitude = loc.latitude,
+                                longitude = loc.longitude,
+                                altitude = if (loc.hasAltitude()) loc.altitude else null,
+                                speed = if (loc.hasSpeed()) loc.speed else null
+                            )
+                            recordedSamples.add(pausedSample)
+                            _liveGpsRoute.value = recordedSamples.filter { it.latitude != null && it.longitude != null }
+                        }
+                    }
                 } else {
                     val estimate: CadenceEstimate = pipeline.processWindow()
                     val rpm = estimate.rpm
@@ -218,11 +253,28 @@ class CadenceTrackingService : Service(), SensorEventListener {
                         speed = if (loc?.hasSpeed() == true) loc.speed else null
                     )
 
-                    // Record sample if pedaling (>0 RPM) OR moving (>0.5 m/s) to maintain unbroken route during coasting
-                    if (rpm > 0 || (loc != null && (loc.speed ?: 0f) > 0.5f)) {
+                    // Record sample if pedaling (>0 RPM) OR moving (>0.5 m/s) OR periodic GPS point (every 2s) to maintain unbroken route
+                    val lastGpsSample = recordedSamples.lastOrNull { it.latitude != null && it.longitude != null }
+                    val shouldRecordGps = loc != null && (
+                        rpm > 0 ||
+                        (loc.speed ?: 0f) > 0.5f ||
+                        lastGpsSample == null ||
+                        (now - lastGpsSample.timestampMs >= 2000L)
+                    )
+
+                    if (rpm > 0 || (loc != null && (loc.speed ?: 0f) > 0.5f) || shouldRecordGps) {
                         recordedSamples.add(sample)
+                        if (sample.latitude != null && sample.longitude != null) {
+                            _liveGpsRoute.value = recordedSamples.filter { it.latitude != null && it.longitude != null }
+                        }
                     }
                     intervalRpmSamples.add(rpm)
+
+                    // Accumulate live pedal strokes
+                    if (rpm > 0) {
+                        liveTotalRevs += rpm * (0.5 / 60.0)
+                        _totalPedalStrokes.value = kotlin.math.round(liveTotalRevs).toInt()
+                    }
 
                     // Voice Dictation: dictate cadence after every user-specified interval
                     val intervalMs = voiceSettings.announcementIntervalSec.value * 1000L
@@ -259,6 +311,10 @@ class CadenceTrackingService : Service(), SensorEventListener {
         _currentCadence.value = 0
         _currentZone.value = CadenceZone.IDLE
         _currentRideId.value = null
+        _currentLocation.value = null
+        _liveGpsRoute.value = emptyList()
+        _totalPedalStrokes.value = 0
+        liveTotalRevs = 0.0
 
         locationCallback?.let { callback ->
             fusedLocationClient.removeLocationUpdates(callback)
@@ -410,6 +466,9 @@ class CadenceTrackingService : Service(), SensorEventListener {
         _currentCadence.value = 0
         _currentZone.value = CadenceZone.IDLE
         _currentRideId.value = null
+        _currentLocation.value = null
+        _liveGpsRoute.value = emptyList()
+        _totalPedalStrokes.value = 0
         audioAnnouncer.shutdown()
     }
 
@@ -439,6 +498,15 @@ class CadenceTrackingService : Service(), SensorEventListener {
         private val _isPhoneInPocketState = MutableStateFlow(true)
         val isPhoneInPocketState = _isPhoneInPocketState.asStateFlow()
 
+        private val _currentLocation = MutableStateFlow<Location?>(null)
+        val currentLocation = _currentLocation.asStateFlow()
+
+        private val _liveGpsRoute = MutableStateFlow<List<CadenceSample>>(emptyList())
+        val liveGpsRoute = _liveGpsRoute.asStateFlow()
+
+        private val _totalPedalStrokes = MutableStateFlow(0)
+        val totalPedalStrokes = _totalPedalStrokes.asStateFlow()
+
         fun clearLastFinishedRideId() {
             _lastFinishedRideId.value = null
         }
@@ -449,6 +517,9 @@ class CadenceTrackingService : Service(), SensorEventListener {
             _currentZone.value = CadenceZone.IDLE
             _currentRideId.value = null
             _lastFinishedRideId.value = null
+            _currentLocation.value = null
+            _liveGpsRoute.value = emptyList()
+            _totalPedalStrokes.value = 0
         }
     }
 }

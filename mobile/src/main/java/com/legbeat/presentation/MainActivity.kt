@@ -196,6 +196,7 @@ fun MainNavigation(
         is Screen.ActiveRide -> {
             ActiveRideScreen(
                 voiceSettings = voiceSettings,
+                flyoverSettings = flyoverSettings,
                 onRideFinished = { rideId ->
                     currentScreen = Screen.Summary(rideId)
                 }
