@@ -34,7 +34,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.core.content.FileProvider
 import com.legbeat.service.FlyoverSettingsRepository
-import com.legbeat.video.FlyoverVideoGenerator
 import com.legbeat.video.FlyoverVideoRecorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -119,9 +118,6 @@ fun PostRideSummaryScreen(
     var showFlyoverDialog by remember { mutableStateOf(false) }
     var hasCheckedShortRide by remember(rideId) { mutableStateOf(false) }
 
-    var isGeneratingVideo by remember { mutableStateOf(false) }
-    var videoGenerationProgress by remember { mutableFloatStateOf(0f) }
-    var videoGenerationStatus by remember { mutableStateOf("") }
     var latestFlyoverVideo by remember { mutableStateOf<File?>(null) }
     var showVideoSuccessDialog by remember { mutableStateOf(false) }
 
@@ -223,7 +219,7 @@ fun PostRideSummaryScreen(
     }
 
     val effectiveFlyoverSettings = flyoverSettings ?: remember { FlyoverSettingsRepository(context) }
-    val videoGenerator = remember { FlyoverVideoGenerator(context) }
+    var autoRecordFlyover by remember { mutableStateOf(false) }
 
     fun startVideoGeneration() {
         val currentRide = ride ?: return
@@ -232,71 +228,8 @@ fun PostRideSummaryScreen(
             Toast.makeText(context, "Cannot generate video: at least 2 GPS coordinates required", Toast.LENGTH_LONG).show()
             return
         }
-        isGeneratingVideo = true
-        videoGenerationProgress = 0.05f
-        videoGenerationStatus = "Initializing 3D video rendering engine..."
-        scope.launch {
-            val file = videoGenerator.generateVideo(
-                ride = currentRide,
-                samples = samples,
-                settings = effectiveFlyoverSettings,
-                onProgress = { prog, status ->
-                    videoGenerationProgress = prog
-                    videoGenerationStatus = status
-                }
-            )
-            isGeneratingVideo = false
-            if (file != null && file.exists()) {
-                latestFlyoverVideo = file
-                showVideoSuccessDialog = true
-                Toast.makeText(context, "3D Flyover Video Generated!", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(context, "Video generation failed. Please try again.", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    if (isGeneratingVideo) {
-        AlertDialog(
-            onDismissRequest = { /* Modal during hardware encoding */ },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        color = ElectricYellow,
-                        strokeWidth = 2.5.dp
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Rendering 3D Video", fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Column {
-                    Text(
-                        text = videoGenerationStatus,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.LightGray
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    LinearProgressIndicator(
-                        progress = { videoGenerationProgress.coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp),
-                        color = ElectricYellow,
-                        trackColor = Color(0xFF333333)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "${(videoGenerationProgress * 100).toInt()}% completed",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ElectricMint,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            confirmButton = {}
-        )
+        autoRecordFlyover = true
+        showFlyoverDialog = true
     }
 
     if (showVideoSuccessDialog && latestFlyoverVideo != null) {
@@ -352,8 +285,14 @@ fun PostRideSummaryScreen(
             ride = ride!!,
             samples = samples,
             flyoverSettings = effectiveFlyoverSettings,
+            autoRecord = autoRecordFlyover,
+            onVideoExported = { file ->
+                latestFlyoverVideo = file
+                autoRecordFlyover = false
+            },
             onDismiss = {
                 showFlyoverDialog = false
+                autoRecordFlyover = false
                 latestFlyoverVideo = FlyoverVideoRecorder.findLatestVideoForRide(context, ride!!.id)
             }
         )
