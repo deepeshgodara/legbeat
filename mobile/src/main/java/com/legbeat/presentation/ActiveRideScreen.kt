@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -325,13 +326,14 @@ fun ActiveRideScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Map Floating HUD (Top-Start): GPS Status, Speed, & Points count
+                // Map Floating HUD (Top-Start): GPS Status & Route points count
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color.Black.copy(alpha = 0.78f),
+                    color = Color.Black.copy(alpha = 0.82f),
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(12.dp)
+                        .statusBarsPadding()
+                        .padding(start = 14.dp, top = 14.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -353,24 +355,6 @@ fun ActiveRideScreen(
                             fontSize = 11.sp
                         )
 
-                        if (hasGps && currentLocation?.hasSpeed() == true) {
-                            val speedKmh = currentLocation!!.speed * 3.6f
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "•",
-                                color = Color.Gray,
-                                fontSize = 11.sp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = String.format(Locale.US, "%.1f km/h", speedKmh),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White,
-                                fontSize = 11.sp
-                            )
-                        }
-
                         if (liveRoutePoints.isNotEmpty()) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
@@ -390,17 +374,18 @@ fun ActiveRideScreen(
                     }
                 }
 
-                // Map Layer Selector Button & Menu (Top-End)
+                // Map Layer Selector Button & Menu (Top-End, comfortably below status bar)
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(12.dp)
+                        .statusBarsPadding()
+                        .padding(end = 14.dp, top = 14.dp)
                 ) {
                     Surface(
                         shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.78f),
+                        color = Color.Black.copy(alpha = 0.82f),
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(40.dp)
                             .clickable { showLayerMenu = true }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -643,13 +628,28 @@ fun ActiveRideScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             val speedKmh = currentLocation?.let { if (it.hasSpeed()) (it.speed * 3.6f) else 0f } ?: 0f
-                            Text(
-                                text = if (speedKmh > 0.5f) String.format(Locale.US, "%.1f", speedKmh) else "--",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                            Row(
+                                verticalAlignment = Alignment.Bottom,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = if (speedKmh > 0.5f) String.format(Locale.US, "%.1f", speedKmh) else "--",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                if (speedKmh > 0.5f) {
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = "km/h",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray,
+                                        fontSize = 9.sp,
+                                        modifier = Modifier.padding(bottom = 2.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }

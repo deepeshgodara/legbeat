@@ -84,9 +84,9 @@ class FlyoverVideoGenerator(private val context: Context) {
         try {
             onProgress(0.05f, "Preparing hardware video encoder...")
 
-            // Setup MediaFormat
+            // Setup MediaFormat for hardware Surface encoding
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, VIDEO_WIDTH, VIDEO_HEIGHT).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
+                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
                 setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
@@ -94,7 +94,12 @@ class FlyoverVideoGenerator(private val context: Context) {
 
             val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            val inputSurface = encoder.createInputSurface()
+            val codecInputSurface = CodecInputSurface(inputSurface)
+            codecInputSurface.makeCurrent()
             encoder.start()
+
+            val textureRenderer = FullFrameTextureRenderer().apply { init() }
 
             val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             var videoTrackIndex = -1
@@ -102,8 +107,6 @@ class FlyoverVideoGenerator(private val context: Context) {
 
             val frameBitmap = Bitmap.createBitmap(VIDEO_WIDTH, VIDEO_HEIGHT, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(frameBitmap)
-            val yuvBuffer = ByteArray(VIDEO_WIDTH * VIDEO_HEIGHT * 3 / 2)
-            val argbBuffer = IntArray(VIDEO_WIDTH * VIDEO_HEIGHT)
             val bufferInfo = MediaCodec.BufferInfo()
 
             // Pre-calculate coordinate bounding box
@@ -154,7 +157,7 @@ class FlyoverVideoGenerator(private val context: Context) {
             }
             val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-            Log.i(TAG, "Starting frame rendering: $totalFrames frames at 30 fps")
+            Log.i(TAG, "Starting frame rendering: $totalFrames frames at 30 fps via hardware Surface")
 
             for (frame in 0 until totalFrames) {
                 val progressFraction = frame.toFloat() / totalFrames.toFloat()
@@ -205,27 +208,16 @@ class FlyoverVideoGenerator(private val context: Context) {
                     textPaint = textPaint
                 )
 
-                // 3. Convert frame to YUV420SP
-                bitmapToYuv420sp(frameBitmap, VIDEO_WIDTH, VIDEO_HEIGHT, argbBuffer, yuvBuffer)
+                // 3. Render directly onto MediaCodec hardware input surface via OpenGL ES
+                textureRenderer.drawFrame(frameBitmap, VIDEO_WIDTH, VIDEO_HEIGHT)
+                val presentationTimeNs = frame * 1_000_000_000L / FRAME_RATE
+                codecInputSurface.setPresentationTime(presentationTimeNs)
+                codecInputSurface.swapBuffers()
 
-                // 4. Send to MediaCodec
-                var inputBufferIndex = encoder.dequeueInputBuffer(10_000L)
-                while (inputBufferIndex < 0) {
-                    videoTrackIndex = drainEncoder(encoder, muxer, bufferInfo, muxerStarted, videoTrackIndex) { started, _ ->
-                        muxerStarted = started
-                    }
-                    inputBufferIndex = encoder.dequeueInputBuffer(10_000L)
-                }
-
-                val inputBuffer = encoder.getInputBuffer(inputBufferIndex)
-                inputBuffer?.clear()
-                inputBuffer?.put(yuvBuffer)
-                val presentationTimeUs = (frame * 1_000_000L / FRAME_RATE)
-                encoder.queueInputBuffer(inputBufferIndex, 0, yuvBuffer.size, presentationTimeUs, 0)
-
-                // 5. Drain encoded output to muxer
-                videoTrackIndex = drainEncoder(encoder, muxer, bufferInfo, muxerStarted, videoTrackIndex) { started, _ ->
+                // 4. Drain encoded output to muxer
+                videoTrackIndex = drainEncoder(encoder, muxer, bufferInfo, muxerStarted, videoTrackIndex) { started, track ->
                     muxerStarted = started
+                    videoTrackIndex = track
                 }
 
                 if (frame % 15 == 0 || frame == totalFrames - 1) {
@@ -234,26 +226,13 @@ class FlyoverVideoGenerator(private val context: Context) {
                 }
             }
 
-            // Signal End of Stream
-            var eosQueued = false
-            var eosAttempts = 0
-            while (!eosQueued && eosAttempts < 20) {
-                val eosBufferIndex = encoder.dequeueInputBuffer(10_000L)
-                if (eosBufferIndex >= 0) {
-                    encoder.queueInputBuffer(eosBufferIndex, 0, 0, (totalFrames * 1_000_000L / FRAME_RATE), MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                    eosQueued = true
-                } else {
-                    videoTrackIndex = drainEncoder(encoder, muxer, bufferInfo, muxerStarted, videoTrackIndex) { started, _ ->
-                        muxerStarted = started
-                    }
-                    eosAttempts++
-                }
-            }
+            // Signal End of Stream to hardware surface encoder
+            encoder.signalEndOfInputStream()
 
             // Drain remaining frames until EOS
             var isEos = false
             var retryCount = 0
-            while (!isEos && retryCount < 30) {
+            while (!isEos && retryCount < 60) {
                 val outIndex = encoder.dequeueOutputBuffer(bufferInfo, 10_000L)
                 if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     if (!muxerStarted) {
@@ -279,7 +258,11 @@ class FlyoverVideoGenerator(private val context: Context) {
                 }
             }
 
-            // Clean up encoder and muxer
+            // Clean up hardware resources
+            try { textureRenderer.release() } catch (_: Exception) {}
+            try { codecInputSurface.release() } catch (_: Exception) {}
+            try { inputSurface.release() } catch (_: Exception) {}
+
             try {
                 encoder.stop()
                 encoder.release()
@@ -595,33 +578,6 @@ class FlyoverVideoGenerator(private val context: Context) {
         val totalPedals = (ride.avgCadence * (ride.durationMs / 60000.0)).toInt()
         val estPedals = (totalPedals * progressFraction).toInt()
         canvas.drawText("$estPedals", 480f, hudBoxTop + 240f, textPaint)
-    }
-
-    private fun bitmapToYuv420sp(bitmap: Bitmap, width: Int, height: Int, argb: IntArray, yuv: ByteArray) {
-        bitmap.getPixels(argb, 0, width, 0, 0, width, height)
-        val frameSize = width * height
-        var yIndex = 0
-        var uvIndex = frameSize
-
-        for (j in 0 until height) {
-            for (i in 0 until width) {
-                val pixel = argb[j * width + i]
-                val r = (pixel shr 16) and 0xff
-                val g = (pixel shr 8) and 0xff
-                val b = pixel and 0xff
-
-                val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
-                val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
-                val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-
-                yuv[yIndex++] = y.coerceIn(0, 255).toByte()
-
-                if (j % 2 == 0 && i % 2 == 0) {
-                    yuv[uvIndex++] = u.coerceIn(0, 255).toByte()
-                    yuv[uvIndex++] = v.coerceIn(0, 255).toByte()
-                }
-            }
-        }
     }
 
     private fun exportToMediaStore(videoFile: File): Uri? {
