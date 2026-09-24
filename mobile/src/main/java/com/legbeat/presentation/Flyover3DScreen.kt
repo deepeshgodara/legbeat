@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -188,13 +189,16 @@ fun Flyover3DScreen(
     val savedTilt by flyoverSettings.cameraTiltAngle.collectAsState()
     val savedSpeed by flyoverSettings.replaySpeed.collectAsState()
     val savedLayer by flyoverSettings.mapLayer.collectAsState()
+    val savedDuration by flyoverSettings.targetVideoDurationSeconds.collectAsState()
 
     var currentTiltAngle by remember { mutableFloatStateOf(savedTilt) }
     var playbackSpeed by remember { mutableIntStateOf(savedSpeed) }
     var currentLayer by remember { mutableStateOf(savedLayer) }
+    var currentDuration by remember { mutableIntStateOf(savedDuration) }
 
     var showLayerMenu by remember { mutableStateOf(false) }
     var showTiltDialog by remember { mutableStateOf(false) }
+    var showDurationDialog by remember { mutableStateOf(false) }
 
     // Screen Capture Permission Launcher
     val screenCaptureLauncher = rememberLauncherForActivityResult(
@@ -350,7 +354,8 @@ fun Flyover3DScreen(
                 }
 
                 // Compute smooth lookahead bearing
-                val lookaheadTimestamp = targetTimestamp + (3000L * playbackSpeed)
+                val lookaheadMs = (totalDurationMs * 0.025).toLong().coerceIn(10_000L, 120_000L)
+                val lookaheadTimestamp = targetTimestamp + lookaheadMs
                 val lookaheadSample = interpolateSampleAt(lookaheadTimestamp, gpsSamples)
                 val lookLat = lookaheadSample?.latitude
                 val lookLon = lookaheadSample?.longitude
@@ -565,6 +570,22 @@ fun Flyover3DScreen(
                             Icons.Default.ScreenRotation,
                             contentDescription = "Camera Tilt",
                             tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                // Video Duration Setting Button
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xCC222222),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    IconButton(onClick = { showDurationDialog = true }) {
+                        Icon(
+                            Icons.Default.Timer,
+                            contentDescription = "Video Duration",
+                            tint = ElectricYellow,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -822,13 +843,16 @@ fun Flyover3DScreen(
 
                         Spacer(modifier = Modifier.width(8.dp))
 
-                        // Speed Toggle (1x, 2x, 4x, 8x)
+                        // Speed Toggle (1x, 2x, 5x, 10x, 25x, 50x, 100x)
                         TextButton(
                             onClick = {
                                 val nextSpeed = when (playbackSpeed) {
                                     1 -> 2
-                                    2 -> 4
-                                    4 -> 8
+                                    2 -> 5
+                                    5 -> 10
+                                    10 -> 25
+                                    25 -> 50
+                                    50 -> 100
                                     else -> 1
                                 }
                                 playbackSpeed = nextSpeed
@@ -841,6 +865,23 @@ fun Flyover3DScreen(
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("${playbackSpeed}x", fontWeight = FontWeight.Bold)
+                        }
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // Duration Chip (Tapping opens duration picker)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF262626),
+                            modifier = Modifier.clickable { showDurationDialog = true }
+                        ) {
+                            Text(
+                                text = "${currentDuration}s",
+                                color = ElectricYellow,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
                         }
                     }
 
@@ -967,6 +1008,91 @@ fun Flyover3DScreen(
             confirmButton = {
                 Button(
                     onClick = { showTiltDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricYellow, contentColor = Color.Black)
+                ) {
+                    Text("Apply", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Target Video Duration Selection Dialog
+    if (showDurationDialog) {
+        AlertDialog(
+            onDismissRequest = { showDurationDialog = false },
+            title = {
+                Text(
+                    "Video Duration (30 FPS)",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        "Select output video duration. Videos are rendered at a guaranteed smooth 30 frames per second:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    val durationOptions = listOf(
+                        Triple(15, "15 seconds", "450 frames • Quick share (Reels / WhatsApp)"),
+                        Triple(30, "30 seconds", "900 frames • Standard cinematic (Recommended)"),
+                        Triple(45, "45 seconds", "1,350 frames • Extended detailed tour"),
+                        Triple(60, "60 seconds", "1,800 frames • Full showcase")
+                    )
+
+                    durationOptions.forEach { (seconds, title, desc) ->
+                        val isSelected = currentDuration == seconds
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable {
+                                    currentDuration = seconds
+                                    flyoverSettings.setTargetVideoDurationSeconds(seconds)
+                                },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) Color(0x33FFE500) else Color(0xFF1E1E1E),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isSelected) ElectricYellow else Color(0x33FFFFFF)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = {
+                                        currentDuration = seconds
+                                        flyoverSettings.setTargetVideoDurationSeconds(seconds)
+                                    },
+                                    colors = RadioButtonDefaults.colors(selectedColor = ElectricYellow)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = title,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) ElectricYellow else Color.White,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = desc,
+                                        color = Color.Gray,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showDurationDialog = false },
                     colors = ButtonDefaults.buttonColors(containerColor = ElectricYellow, contentColor = Color.Black)
                 ) {
                     Text("Apply", fontWeight = FontWeight.Bold)

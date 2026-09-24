@@ -38,8 +38,11 @@ import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
+import android.graphics.Path
 
 /**
  * Hardware-accelerated 3D Map Flyover Video Recorder.
@@ -83,16 +86,18 @@ class FlyoverMapRecorder(private val context: Context) {
 
         val layer = settings.mapLayer.value
         val tiltAngle = settings.cameraTiltAngle.value
-        val durationSeconds = when (settings.replaySpeed.value) {
-            1 -> 16
-            2 -> 10
-            4 -> 8
-            8 -> 6
-            else -> 10
-        }
+        val durationSeconds = settings.targetVideoDurationSeconds.value.coerceIn(10, 120)
 
         val totalFrames = FRAME_RATE * durationSeconds
         val totalDurationMs = ride.durationMs.coerceAtLeast(1000L)
+
+        // Precompute smooth trajectory and stabilized camera bearings
+        val trajectory = precomputeFlyoverTrajectory(
+            gpsSamples = gpsSamples,
+            startTimeMs = ride.startTimeMs,
+            totalDurationMs = totalDurationMs,
+            totalFrames = totalFrames
+        )
 
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir
         val outputFile = File(dir, "legbeat_flyover_${ride.id}_${System.currentTimeMillis()}.mp4")
@@ -134,24 +139,24 @@ class FlyoverMapRecorder(private val context: Context) {
             val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
             // Let the map settle at the starting position
-            val firstSample = gpsSamples.first()
-            val secondSample = if (gpsSamples.size > 1) gpsSamples[1] else firstSample
-            var currentBearing = calculateBearing(
-                firstSample.latitude!!, firstSample.longitude!!,
-                secondSample.latitude!!, secondSample.longitude!!
+            val firstWp = trajectory.firstOrNull() ?: FlyoverWaypoint(
+                lat = gpsSamples.first().latitude!!,
+                lon = gpsSamples.first().longitude!!,
+                bearing = 0.0,
+                sample = gpsSamples.first()
             )
 
             withContext(Dispatchers.Main) {
                 map.cameraPosition = CameraPosition.Builder()
-                    .target(LatLng(firstSample.latitude!!, firstSample.longitude!!))
+                    .target(LatLng(firstWp.lat, firstWp.lon))
                     .zoom(16.0)
                     .tilt(tiltAngle.toDouble())
-                    .bearing(currentBearing)
+                    .bearing(firstWp.bearing)
                     .build()
             }
             delay(400L) // Wait for tiles to settle
 
-            Log.i(TAG, "Starting map recording: $totalFrames frames at $FRAME_RATE fps (Real MapLibre map)")
+            Log.i(TAG, "Starting map recording: $totalFrames frames at $FRAME_RATE fps ($durationSeconds s duration, Real MapLibre map)")
 
             var lastValidMapBitmap: Bitmap? = null
 
@@ -162,21 +167,11 @@ class FlyoverMapRecorder(private val context: Context) {
                 }
 
                 val progressFraction = frame.toFloat() / totalFrames.toFloat()
-                val targetTimestamp = ride.startTimeMs + (progressFraction * totalDurationMs).toLong()
-
-                // Find interpolated current sample and lookahead bearing
-                val currentSample = interpolateSampleAt(targetTimestamp, gpsSamples) ?: gpsSamples.first()
-                val curLat = currentSample.latitude ?: gpsSamples.first().latitude!!
-                val curLon = currentSample.longitude ?: gpsSamples.first().longitude!!
-
-                val lookaheadTimestamp = targetTimestamp + 2500L
-                val lookSample = interpolateSampleAt(lookaheadTimestamp, gpsSamples) ?: currentSample
-                val targetBearing = calculateBearing(
-                    curLat, curLon,
-                    lookSample.latitude ?: curLat,
-                    lookSample.longitude ?: curLon
-                )
-                currentBearing = interpolateAngle(currentBearing, targetBearing, 0.3)
+                val wp = trajectory[frame]
+                val curLat = wp.lat
+                val curLon = wp.lon
+                val currentBearing = wp.bearing
+                val currentSample = wp.sample
 
                 // 1. Update MapLibre camera on Main Thread
                 withContext(Dispatchers.Main) {
@@ -229,7 +224,18 @@ class FlyoverMapRecorder(private val context: Context) {
                     canvas.drawColor(Color.rgb(18, 24, 32))
                 }
 
-                // 4. Draw Telemetry HUD overlay
+                // 4. Draw Rider Location Pin (Center of camera target)
+                val zone = CadenceZone.fromRpm(currentSample.rpm)
+                renderRiderPin(
+                    canvas = canvas,
+                    centerX = VIDEO_WIDTH / 2f,
+                    centerY = VIDEO_HEIGHT / 2f,
+                    frame = frame,
+                    zoneColor = zone.colorHex.toInt(),
+                    textPaint = textPaint
+                )
+
+                // 5. Draw Telemetry HUD overlay
                 renderTelemetryHud(
                     canvas = canvas,
                     ride = ride,
@@ -240,21 +246,21 @@ class FlyoverMapRecorder(private val context: Context) {
                     textPaint = textPaint
                 )
 
-                // 5. Blit onto hardware surface via OpenGL ES texture
+                // 6. Blit onto hardware surface via OpenGL ES texture
                 textureRenderer.drawFrame(frameBitmap, VIDEO_WIDTH, VIDEO_HEIGHT)
                 val presentationTimeNs = frame * 1_000_000_000L / FRAME_RATE
                 codecInputSurface.setPresentationTime(presentationTimeNs)
                 codecInputSurface.swapBuffers()
 
-                // 6. Drain encoded packets to MediaMuxer
+                // 7. Drain encoded packets to MediaMuxer
                 videoTrackIndex = drainEncoder(encoder, muxer, bufferInfo, muxerStarted, videoTrackIndex) { started, track ->
                     muxerStarted = started
                     videoTrackIndex = track
                 }
 
-                if (frame % 10 == 0 || frame == totalFrames - 1) {
+                if (frame % 15 == 0 || frame == totalFrames - 1) {
                     val pct = (frame + 1).toFloat() / totalFrames.toFloat()
-                    onProgress(0.05f + (pct * 0.90f), "Recording 3D flyover: ${(pct * 100).toInt()}% (Frame ${frame + 1}/$totalFrames)")
+                    onProgress(0.05f + (pct * 0.90f), "Recording 3D flyover: ${(pct * 100).toInt()}% (Frame ${frame + 1}/$totalFrames @ 30 fps)")
                 }
             }
 
@@ -589,4 +595,219 @@ class FlyoverMapRecorder(private val context: Context) {
         if (diff < -180.0) diff += 360.0
         return (current + diff * factor + 360.0) % 360.0
     }
+
+    private fun renderRiderPin(
+        canvas: Canvas,
+        centerX: Float,
+        centerY: Float,
+        frame: Int,
+        zoneColor: Int,
+        textPaint: Paint
+    ) {
+        // 1. Ground shadow (gives 3D elevation illusion under tilt)
+        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(130, 0, 0, 0)
+            style = Paint.Style.FILL
+        }
+        canvas.drawOval(
+            RectF(centerX - 24f, centerY + 6f, centerX + 24f, centerY + 22f),
+            shadowPaint
+        )
+
+        // 2. Animated outer pulsing radar rings
+        val pulsePhase = (frame % 30) / 30f
+        val pulseRadius = 24f + (pulsePhase * 32f) // expands from 24f to 56f
+        val pulseAlpha = ((1f - pulsePhase) * 160).toInt().coerceIn(0, 255)
+        val pulsePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(pulseAlpha, 0, 230, 118) // Electric Mint pulse
+            style = Paint.Style.STROKE
+            strokeWidth = 3f
+        }
+        canvas.drawCircle(centerX, centerY, pulseRadius, pulsePaint)
+
+        // Second offset pulse for continuous radar wave
+        val pulsePhase2 = ((frame + 15) % 30) / 30f
+        val pulseRadius2 = 24f + (pulsePhase2 * 32f)
+        val pulseAlpha2 = ((1f - pulsePhase2) * 120).toInt().coerceIn(0, 255)
+        val pulsePaint2 = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(pulseAlpha2, 255, 229, 0) // Electric Yellow pulse
+            style = Paint.Style.STROKE
+            strokeWidth = 2.5f
+        }
+        canvas.drawCircle(centerX, centerY, pulseRadius2, pulsePaint2)
+
+        // 3. Crisp white outer halo ring
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(centerX, centerY, 16f, haloPaint)
+
+        // 4. Dark rim
+        val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(18, 24, 32)
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(centerX, centerY, 12f, rimPaint)
+
+        // 5. Electric core (matches current Cadence zone color!)
+        val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = zoneColor
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(centerX, centerY, 8f, corePaint)
+
+        // 6. Directional Forward Heading Chevron
+        // Since camera aligns with rider bearing, forward along the road is UP (-Y)
+        val chevronPath = Path().apply {
+            moveTo(centerX, centerY - 28f) // apex
+            lineTo(centerX - 9f, centerY - 18f) // bottom-left
+            lineTo(centerX, centerY - 21f) // notch
+            lineTo(centerX + 9f, centerY - 18f) // bottom-right
+            close()
+        }
+        val chevronBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+        }
+        val chevronFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#00E676")
+            style = Paint.Style.FILL
+        }
+        canvas.drawPath(chevronPath, chevronFillPaint)
+        canvas.drawPath(chevronPath, chevronBorderPaint)
+
+        // 7. Sleek "RIDER" Pill Badge
+        val badgeTop = centerY - 52f
+        val badgeBottom = centerY - 32f
+        val badgeWidth = 64f
+        val badgeRect = RectF(centerX - (badgeWidth / 2f), badgeTop, centerX + (badgeWidth / 2f), badgeBottom)
+
+        val badgeBg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(220, 12, 16, 22)
+            style = Paint.Style.FILL
+        }
+        val badgeBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(160, 0, 230, 118)
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f
+        }
+        canvas.drawRoundRect(badgeRect, 10f, 10f, badgeBg)
+        canvas.drawRoundRect(badgeRect, 10f, 10f, badgeBorder)
+
+        textPaint.color = Color.WHITE
+        textPaint.textSize = 12f
+        textPaint.isFakeBoldText = true
+        val badgeText = "RIDER"
+        val textWidth = textPaint.measureText(badgeText)
+        canvas.drawText(badgeText, centerX - (textWidth / 2f), badgeBottom - 5f, textPaint)
+    }
+
+    private fun precomputeFlyoverTrajectory(
+        gpsSamples: List<CadenceSample>,
+        startTimeMs: Long,
+        totalDurationMs: Long,
+        totalFrames: Int
+    ): List<FlyoverWaypoint> {
+        if (totalFrames <= 0) return emptyList()
+
+        // 1. Resample raw coordinates uniformly across all frames
+        val rawLats = DoubleArray(totalFrames)
+        val rawLons = DoubleArray(totalFrames)
+        val samples = ArrayList<CadenceSample>(totalFrames)
+
+        val first = gpsSamples.first()
+        for (i in 0 until totalFrames) {
+            val fraction = i.toDouble() / (totalFrames - 1).coerceAtLeast(1)
+            val targetTimestamp = startTimeMs + (fraction * totalDurationMs).toLong()
+            val s = interpolateSampleAt(targetTimestamp, gpsSamples) ?: first
+            samples.add(s)
+            rawLats[i] = s.latitude ?: first.latitude!!
+            rawLons[i] = s.longitude ?: first.longitude!!
+        }
+
+        // 2. Spatial low-pass Gaussian/boxcar smoothing over coordinates (lat, lon)
+        // This removes GPS measurement noise and high-frequency coordinate jitter
+        val smoothLats = DoubleArray(totalFrames)
+        val smoothLons = DoubleArray(totalFrames)
+        val spatialWindow = (totalFrames * 0.015).toInt().coerceIn(3, 15)
+
+        for (i in 0 until totalFrames) {
+            var sumLat = 0.0
+            var sumLon = 0.0
+            var weightSum = 0.0
+            val start = max(0, i - spatialWindow)
+            val end = min(totalFrames - 1, i + spatialWindow)
+            for (j in start..end) {
+                val dist = (j - i).toDouble() / spatialWindow
+                val weight = exp(-dist * dist * 2.0) // Gaussian bell curve
+                sumLat += rawLats[j] * weight
+                sumLon += rawLons[j] * weight
+                weightSum += weight
+            }
+            smoothLats[i] = sumLat / weightSum
+            smoothLons[i] = sumLon / weightSum
+        }
+
+        // 3. Compute forward path lookahead bearings along the smoothed spatial trajectory
+        val rawBearings = DoubleArray(totalFrames)
+        val lookaheadFrames = (totalFrames * 0.025).toInt().coerceIn(4, 25)
+
+        for (i in 0 until totalFrames) {
+            val lookaheadIdx = min(totalFrames - 1, i + lookaheadFrames)
+            if (lookaheadIdx != i) {
+                rawBearings[i] = calculateBearing(
+                    smoothLats[i], smoothLons[i],
+                    smoothLats[lookaheadIdx], smoothLons[lookaheadIdx]
+                )
+            } else if (i > 0) {
+                rawBearings[i] = rawBearings[i - 1]
+            } else {
+                rawBearings[i] = 0.0
+            }
+        }
+
+        // 4. Circular moving average over bearing angles to eliminate abrupt yaw turns
+        val smoothBearings = DoubleArray(totalFrames)
+        val angleWindow = (totalFrames * 0.015).toInt().coerceIn(3, 12)
+
+        for (i in 0 until totalFrames) {
+            var sumSin = 0.0
+            var sumCos = 0.0
+            var wSum = 0.0
+            val start = max(0, i - angleWindow)
+            val end = min(totalFrames - 1, i + angleWindow)
+            for (j in start..end) {
+                val dist = (j - i).toDouble() / angleWindow
+                val weight = exp(-dist * dist * 2.0)
+                val rad = Math.toRadians(rawBearings[j])
+                sumSin += sin(rad) * weight
+                sumCos += cos(rad) * weight
+                wSum += weight
+            }
+            val avgAngle = (Math.toDegrees(atan2(sumSin / wSum, sumCos / wSum)) + 360.0) % 360.0
+            smoothBearings[i] = avgAngle
+        }
+
+        val result = ArrayList<FlyoverWaypoint>(totalFrames)
+        for (i in 0 until totalFrames) {
+            result.add(
+                FlyoverWaypoint(
+                    lat = smoothLats[i],
+                    lon = smoothLons[i],
+                    bearing = smoothBearings[i],
+                    sample = samples[i]
+                )
+            )
+        }
+        return result
+    }
 }
+
+data class FlyoverWaypoint(
+    val lat: Double,
+    val lon: Double,
+    val bearing: Double,
+    val sample: CadenceSample
+)

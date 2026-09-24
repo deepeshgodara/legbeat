@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -219,6 +221,7 @@ fun PostRideSummaryScreen(
     }
 
     val effectiveFlyoverSettings = flyoverSettings ?: remember { FlyoverSettingsRepository(context) }
+    val selectedVideoDuration by effectiveFlyoverSettings.targetVideoDurationSeconds.collectAsState()
     var autoRecordFlyover by remember { mutableStateOf(false) }
 
     fun startVideoGeneration() {
@@ -696,7 +699,61 @@ fun PostRideSummaryScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Video Duration Selector Row (15s, 30s, 45s, 60s @ 30 FPS)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "TARGET DURATION (30 FPS)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Gray
+                                )
+                                Text(
+                                    text = "${selectedVideoDuration}s • ${selectedVideoDuration * 30} frames @ 30fps",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ElectricMint
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(15, 30, 45, 60).forEach { dur ->
+                                    val isChosen = selectedVideoDuration == dur
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                effectiveFlyoverSettings.setTargetVideoDurationSeconds(dur)
+                                            },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isChosen) ElectricYellow else Color(0xFF262626),
+                                        border = if (isChosen) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0x33FFFFFF))
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.padding(vertical = 7.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "${dur}s",
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 13.sp,
+                                                color = if (isChosen) Color.Black else Color.White
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
 
                             val currentVideo = latestFlyoverVideo
                             if (currentVideo != null && currentVideo.exists()) {

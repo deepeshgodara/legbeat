@@ -87,6 +87,9 @@ class FlyoverSettingsRepository @Inject constructor(
     private val _mapLayer = MutableStateFlow(MapLayerType.fromId(prefs.getString(KEY_MAP_LAYER, MapLayerType.STREET.id)))
     val mapLayer: StateFlow<MapLayerType> = _mapLayer.asStateFlow()
 
+    private val _targetVideoDurationSeconds = MutableStateFlow(prefs.getInt(KEY_VIDEO_DURATION, 30))
+    val targetVideoDurationSeconds: StateFlow<Int> = _targetVideoDurationSeconds.asStateFlow()
+
     fun setCameraTiltAngle(angle: Float) {
         val clamped = angle.coerceIn(30.0f, 85.0f)
         _cameraTiltAngle.value = clamped
@@ -95,7 +98,9 @@ class FlyoverSettingsRepository @Inject constructor(
 
     fun setReplaySpeed(speed: Int) {
         val validSpeed = when (speed) {
-            1, 2, 4, 8 -> speed
+            1, 2, 5, 10, 25, 50, 100 -> speed
+            4 -> 5
+            8 -> 10
             else -> 2
         }
         _replaySpeed.value = validSpeed
@@ -107,9 +112,16 @@ class FlyoverSettingsRepository @Inject constructor(
         prefs.edit().putString(KEY_MAP_LAYER, layer.id).apply()
     }
 
+    fun setTargetVideoDurationSeconds(seconds: Int) {
+        val clamped = seconds.coerceIn(10, 120)
+        _targetVideoDurationSeconds.value = clamped
+        prefs.edit().putInt(KEY_VIDEO_DURATION, clamped).apply()
+    }
+
     companion object {
         private const val KEY_TILT_ANGLE = "flyover_camera_tilt_angle"
         private const val KEY_REPLAY_SPEED = "flyover_replay_speed"
         private const val KEY_MAP_LAYER = "flyover_map_layer"
+        private const val KEY_VIDEO_DURATION = "flyover_video_duration"
     }
 }
